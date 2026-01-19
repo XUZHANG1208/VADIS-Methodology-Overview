@@ -1,0 +1,12 @@
+"","online","SpokenFormal","SpokenInformal","WrittenFormal","WrittenInformal"
+"(Intercept)",1,1,1,1,1
+"POR_ANIMACY_2",1,1,1,1,1
+"POR_LENGTH_WORDS",1,1,1,1,1
+"PUM_LENGTH_WORDS",1,1,1,1,1
+"POR_NP_EXPR_TYPE_3np",1,1,0,1,1
+"POR_NP_EXPR_TYPE_3other",0,0,0,0,0
+"POR_FINAL_SIBILANCY",1,1,1,1,1
+"PREVIOUS_CHOICEof",1,1,1,0,0
+"PREVIOUS_CHOICEs",1,1,0,1,1
+"SEM_REL_2",0,0,1,0,1
+"POR_HEAD_FREQ",1,1,0,1,1

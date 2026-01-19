@@ -1,0 +1,10 @@
+"","online","SpokenFormal","SpokenInformal","WrittenFormal","WrittenInformal"
+"(Intercept)",1,1,0,1,1
+"DirObjWordLength",1,1,1,1,1
+"DirObjDefiniteness",0,1,1,1,1
+"DirObjGivenness",0,0,1,0,0
+"DirObjConcreteness",1,1,1,0,0
+"DirObjThematicity",0,1,1,1,1
+"DirectionalPP",1,1,1,1,1
+"Semantics",0,1,1,1,1
+"Surprisal.P",1,1,1,1,1

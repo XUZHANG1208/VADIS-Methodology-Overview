@@ -1,0 +1,10 @@
+"","online","SpokenFormal","SpokenInformal","WrittenFormal","WrittenInformal"
+"(Intercept)",0,0,1,0,0
+"logWeightRatio",1,1,1,1,1
+"RecPron",1,1,1,1,1
+"ThemeBinComplexity",1,1,1,1,1
+"ThemeHeadFreq",0,1,1,0,0
+"ThemePron",1,1,1,0,1
+"ThemeDefiniteness",1,1,1,1,1
+"RecGivenness",1,0,1,1,1
+"RecHeadFreq",1,0,1,0,1

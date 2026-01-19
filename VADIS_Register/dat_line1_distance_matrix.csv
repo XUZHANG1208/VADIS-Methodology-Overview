@@ -1,0 +1,6 @@
+"","online","SpokenFormal","SpokenInformal","WrittenFormal","WrittenInformal"
+"online",0,0.375,0.125,0.25,0
+"SpokenFormal",0.375,0,0.25,0.375,0.375
+"SpokenInformal",0.125,0.25,0,0.375,0.125
+"WrittenFormal",0.25,0.375,0.375,0,0.25
+"WrittenInformal",0,0.375,0.125,0.25,0
