@@ -1,0 +1,4055 @@
+---
+title: "*Comparative variation analysis*"
+subtitle: "Complete code supplement"
+author: "Jason Grafmiller<br>Benedikt Szmrecsanyi"
+date: "`r format(Sys.Date(), '%d %B, %Y')`"
+format:
+  html: 
+    toc: true
+    toc-location: left
+    fig-width: 6
+    fig-height: 4
+    theme: 
+      light: flatly
+      dark: darkly
+    mainfont: 'Roboto'
+    fontsize: 100%
+    # df-print: paged
+    code-copy: true
+    code-tools:
+      source: true
+      toggle: true
+      caption: "code"
+    embed-resources: true
+knitr:
+  opts_chunk: 
+    cache.path: "../cache/"
+    # Figurepath: "../figures/"
+    tidy: styler
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+tbl-cap-location: top
+fig-cap-location: bottom
+crossref:
+  chapters: true
+filters:
+  - lightbox
+lightbox: auto
+bibliography: Sz_Gr_CUP_syntactic_variation.bib
+csl: unified-style-linguistics.csl
+---
+
+# Introduction 
+
+This document contains the complete R code for the analyses presented in Szmrecsanyi & Grafmiller (2023) *Comparative variation analysis: Grammatical alternations in World Englishes*, Cambridge University Press. All code for the plots and analyses in the book can be found here. Some code is folded for readability, but you can see the code by clicking the "Code" buttons above the tables or figures, or clicking "Show All Code" in the  `</> code` menu in the upper right. The full [Quarto](https://quarto.org/) source code for this document can be found under "View Source".
+
+This document follows the chapter structure in the book, reconstructing all the quantitative analyses in Chapters 4-7. For readability, supplementary code for some parts has been moved to an Appendix (@sec-appendix). All datasets and other files are available in the accompanying Open Science Framework repository: <https://osf.io/5hvtw/>.
+
+## R setup
+
+#### Libraries
+
+Load the libraries. 
+
+```{r}
+#| label: libs
+pkgs <- c(
+  "here",        # for file path management
+  "knitr",       # for knitting rmarkdown
+  "kableExtra",  # for table styling
+  "gmodels",     # for crosstables
+  "hypr",        # for calculating custom factor contrast codings
+  "lme4",        # for mixed-effects models
+  "lmerTest",    # significance tests for GLMMs
+  "optimx",      # lme4 optimizer
+  "MuMIn",       # for r.squaredGLMM
+  "car",         # for recoding
+  "caret",       # for evaluating model
+  "performance", # for evaluating model
+  "parameters",  # for summarizing model
+  "ggeffects",   # get partial effects from models
+  "Hmisc",       # for `somers2()` function
+  
+  "party",       # for random forests
+  "permimp",     # for faster varimp for {party}
+  "phangorn",    # for neighborNets
+  
+  "analogue",    # for fusing distance matrices
+  "vegan",       # for Mantel tests of distance matrix correlations
+  
+  "remotes",     # for installing from GitHub
+  "tidyverse",   # for data wrangling and plotting: dplyr, ggplot2, etc.
+  "ggdendro",    # for working with dendrograms in ggplot2
+  "patchwork",   # for combining ggplots
+  "scales",      # for adding scales to ggplots
+  "ggrepel",     # for nicely annotating points with text 
+  "extrafont"   # for fonts in figures
+)
+```
+
+Install packages (if not not already installed) and load them. 
+
+```{r}
+#| label: install-libs
+install.packages(pkgs[!pkgs %in% installed.packages()[,1]])
+invisible(lapply(pkgs, FUN = function(x) suppressMessages(library(x, character.only = TRUE))))
+rm(pkgs) # remove list
+```
+
+Install and load the `{VADIS}` package.
+
+```{r}
+#| label: load-vadis
+# remotes::install_github("jasongraf1/VADIS")
+library(VADIS)
+```
+
+
+#### Custom functions
+
+The file `custom_functions.R` contains functions used for data wrangling and other things. 
+
+```{r}
+#| label: custom-funcs
+source("custom_functions.R")
+```
+
+#### Plot styling
+
+Set style for figures.
+
+```{r}
+#| label: set-style
+extrafont::loadfonts(device = "win")
+text_cols = c("black", "white")
+
+theme_cup <- function(){
+  # Set the theme
+  theme_classic() %+replace%
+    theme(
+      strip.text.x = element_text(size = 10, color = "black",
+                                hjust = 0, face = "bold", family = "serif"),
+      strip.background = element_blank(),
+      axis.text.x = element_text(color = "black", size = 12),
+      axis.text.y = element_text(color = "black", size = 12),
+      axis.title = element_text(size = rel(1.3)),
+      plot.title = element_text(size = rel(1.4), color = "black", hjust = 0,
+                                face = "bold",
+                                margin = margin(b = 10)),
+      axis.line = element_line(color = "black"),
+      panel.grid.minor = element_blank(),
+      text = element_text(family = "serif")
+    )
+}
+```
+
+
+## Datasets
+
+Load in the annotated datasets from the corpora and preprocess them. Descriptions of these datasets are found in Chapter 4 of the book, and further details are provided in the annotation manuals contained in the OSF repository: <https://osf.io/5hvtw/>.
+
+For each we collapse infrequent levels of lexical items and texts, which will be included as random effects in the regression models. 
+
+Set variety labels order.
+
+```{r}
+var_levs <- c("BrE","CanE","IrE","NZE","HKE","IndE","JamE","PhlE","SgE")
+```
+
+
+#### Genitives
+
+```{r}
+#| label: data-gens
+data_genitives <- readRDS(here("data", "data_gentives_CUP.rds")) |> 
+  as.data.frame()
+
+data_genitives$PorHeadLemma_pruned <- filter_infrequent(data_genitives$POR_HEAD_LEMMA, 20)
+data_genitives$PumHeadLemma_pruned <- filter_infrequent(data_genitives$PUM_HEAD_LEMMA, 20)
+data_genitives$FileID_pruned <- filter_infrequent(data_genitives$PUM_HEAD_LEMMA, 20)
+data_genitives$variety_of_E <- factor(data_genitives$variety_of_E, levels = var_levs)
+```
+
+
+#### Datives
+
+```{r}
+#| label: data-dats
+data_datives <- here("data", "data_datives_CUP.rds") |> 
+  readRDS()
+
+data_datives$Verb_pruned <- filter_infrequent(data_datives$Verb, 20)
+data_datives$RecHeadPlain_pruned <- filter_infrequent(data_datives$RecHeadPlain, 20)
+data_datives$ThemeHeadPlain_pruned <- filter_infrequent(data_datives$ThemeHeadPlain, 20)
+data_datives$FileID_pruned <- filter_infrequent(data_datives$FileID, 20) # less than 20 and the glmer model won't converge
+data_datives$variety_of_E <- factor(data_datives$variety_of_E, levels = var_levs)
+```
+
+
+#### Particle verbs
+
+```{r}
+#| label: data-pv
+data_particle_verbs <- here("data", "data_particle_verbs_CUP.rds") |> 
+  readRDS()
+
+data_particle_verbs$VerbPart_pruned <- filter_infrequent(data_particle_verbs$VerbPart, 20)
+data_particle_verbs$Verb_pruned <- filter_infrequent(data_particle_verbs$Verb, 20)
+data_particle_verbs$FileID_pruned <- filter_infrequent(data_particle_verbs$FileID, 20)
+data_particle_verbs$variety_of_E <- factor(data_particle_verbs$variety_of_E, levels = var_levs)
+```
+
+
+# Chapter 4
+
+This chapter introduces the corpora used, and describes the data collection and annotation procedures.
+
+**Table 4.2** of the size fo the GloWbE corpus.
+
+```{r}
+#| label: tbl-glowbe-4.2
+#| tbl-cap: "Design of the GloWbE corpus (from Davies and Fuchs 2015, 6)."
+#| code-fold: true
+data_glowbe_corpus <- read.csv(here("data", "glowbe_corpus_size.csv")) |> 
+  rename(Country = "X")
+data_glowbe_corpus |> 
+  kable() |>
+  kable_styling()
+```
+
+
+Tables 4.3-5 showign distribution of alternation variants by corpus and variety.
+
+```{r}
+#| label: tbl-4.3
+#| tbl-cap: Summary of genitive variants in ICE and GloWbE corpus data
+#| code-fold: true
+gens_df_split <- split(data_genitives, data_genitives$Corpus)
+ice_summary <- table(
+  gens_df_split$ICE$variety_of_E,
+  gens_df_split$ICE$Response
+) |>
+  make_prop_table()
+glowbe_summary <- table(
+  gens_df_split$GloWbE$variety_of_E,
+  gens_df_split$GloWbE$Response
+) |>
+  make_prop_table()
+cbind(ice_summary, glowbe_summary) |>
+    kable() |>
+    add_header_above(c(" ", "ICE" = 5, "GloWbE" = 5), bold = T) |> 
+  kable_styling()
+```
+
+```{r}
+#| label: tbl-4.4
+#| tbl-cap: Summary of dative variants in ICE and GloWbE corpus data
+#| code-fold: true
+dats_df_split <- split(data_datives, data_datives$Corpus)
+ice_summary <- table(
+  dats_df_split$ice$variety_of_E,
+  dats_df_split$ice$Response
+) |>
+  make_prop_table()
+glowbe_summary <- table(
+  dats_df_split$glowbe$variety_of_E,
+  dats_df_split$glowbe$Response
+) |>
+  make_prop_table()
+cbind(ice_summary, glowbe_summary) |>
+    kable() |>
+    add_header_above(c(" ", "ICE" = 5, "GloWbE" = 5), bold = T) |> 
+  kable_styling()
+```
+
+```{r}
+#| label: tbl-4.5
+#| tbl-cap: Summary of particle placement variants in ICE and GloWbE corpus data
+#| code-fold: true
+pv_df_split <- split(data_datives, data_datives$Corpus)
+ice_summary <- table(
+  pv_df_split$ice$variety_of_E,
+  pv_df_split$ice$Response
+) |>
+  make_prop_table()
+glowbe_summary <- table(
+  pv_df_split$glowbe$variety_of_E,
+  pv_df_split$glowbe$Response
+) |>
+  make_prop_table()
+cbind(ice_summary, glowbe_summary) |>
+    kable() |>
+    add_header_above(c(" ", "ICE" = 5, "GloWbE" = 5), bold = T) |> 
+  kable_styling()
+```
+
+
+# Chapter 5
+
+Chapter 5 focuses on analysis of individual alternations. For each alternation we fit single random forest model to the entire dataset and assess variable importance, then we examine variable importance for each variety individually based on separate by-variety forests. Finally, we fit a mixed-effects regression model to the entire dataset and examine significant interactions between internal constraints and variety.
+
+## 5.2 Genitive alternation
+
+Cross tabulate genitive variant and variety of English.
+
+```{r}
+#| label: tbl-gen-crosstab
+#| tbl-cap: "Variant rates of genitive constructions across varieties of English. Upper half of the table: Inner Circle varieties of English; lower half of the table: Outer Circle varieties of English."
+table(data_genitives$variety_of_E, data_genitives$Response) |>
+  make_prop_table() |> 
+  kable() |>
+  kable_styling()
+```
+
+### Variable importance in global random forest model
+
+Now fit conditional random forest to the full genitives dataset. 
+
+```{r}
+#| label: crf-gens-fmla
+# formula
+gen_f1 <- Response ~
+  PorAnimacyBin +
+  PorLength +
+  PumLength +
+  PorNPexprTypeBin +
+  PorFinalSibilancy +
+  PreviousChoice +
+  SemanticRelationBin +
+  PorHeadFreq
+
+gen_f2 <- update(gen_f1, .~. + variety_of_E + Circle + GenreCoarse)
+gen_f3 <- update(gen_f1, .~. + GenreCoarse)
+```
+
+Run the forest and save output. `{party}` models are large and slow, so save output for reloading. Note that model outputs are not currently stored on OSF.
+
+```{r}
+#| label: crf-gens1
+#| eval: false
+if(file.exists(here("model_output", "gen_forest1.rds"))){
+  # load file if already run
+    gen_forest1 <- readRDS(here("model_output", "gen_forest1.rds"))
+  } else {
+  # if file doesn't already exist, run the analysis and save to file
+    gen_forest1 <- party::cforest(gen_f2, data_genitives)
+    saveRDS(gen_forest1, here("model_output", "gen_forest1.rds"))
+  }
+```
+
+Get predictions, again saving output for quicker loading later.
+
+```{r}
+#| label: crf-gens1-preds
+if(file.exists(here("model_output", "gen_forest1_preds.rds"))){
+  gen_forest1_preds <- readRDS(here("model_output", "gen_forest1_preds.rds"))
+  } else {
+    gen_forest1_preds <- unlist(party::treeresponse(gen_forest1))[c(FALSE, TRUE)]
+    saveRDS(gen_forest1_preds, here("model_output", "gen_forest1_preds.rds"))
+  }
+```
+
+Check predictive performance.
+
+```{r}
+data_genitives$fitted_crf1 <- gen_forest1_preds
+data_genitives$predicted_crf1 <- as.factor(ifelse(data_genitives$fitted_crf1 >= .5, "s", "of"))
+caret::confusionMatrix(data_genitives$predicted_crf1, data_genitives$Response,
+                       mode = "prec_recall")
+```
+
+Check Area under ROC curve. This is alternatively known as the concordance index *c* [@harrell_regression_2001, 105, 257].
+
+```{r}
+data.frame(
+  obs = data_genitives$Response,
+  pred = data_genitives$predicted_crf1,
+  of = 1 - data_genitives$fitted_crf1,
+  s = data_genitives$fitted_crf1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_genitives$Response))
+```
+
+Get (unconditional) variable importance scores, saving outputs again.
+
+```{r}
+#| label: crf-gens1-varimp
+#| cache: true
+if(!file.exists(here("model_output", "gen_forest1_varimp.rds"))){
+    gen_forest1_varimp <- permimp(gen_forest1, conditional = FALSE, progressBar = FALSE, asParty = TRUE)
+    saveRDS(gen_forest1_varimp, here("model_output", "gen_forest1_varimp.rds"))
+  } else {
+    gen_forest1_varimp <- here("model_output", "gen_forest1_varimp.rds") |> 
+      readRDS()
+  }
+invisible(gc(verbose = FALSE)) # free up usused memory (party RFs are big)
+```
+
+Create **Figure 5.1** ploting the variable importances for the entire genitives dataset.
+
+```{r}
+#| label: fig-gens-5.1
+#| fig-cap: "CRF permutation variable importance ranking for the pooled genitive dataset. C = 0.94."
+#| fig-width: 5
+#| fig-height: 4
+data.frame(Varimp = gen_forest1_varimp$values) |> 
+  # rename(Varimp = "gen_forest1_varimp$values") |> 
+  rownames_to_column("Variable") |> 
+  ggplot(aes(reorder(Variable, Varimp), Varimp)) +
+  geom_hline(yintercept = 0) +
+  geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+  geom_point(col = "black") +
+  coord_flip() +
+  theme_cup() +
+  labs(x = "", y = "Variable Importance")
+```
+
+
+### Variable importance in by-variety random forest variable importances
+
+Next we fit RFs to each variety individually and calculate the variable importance. First split the data.
+
+```{r}
+#| label: gens-data-split
+data_genitives_split <- split(data_genitives, data_genitives$variety_of_E)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_list.rds"))){
+  genitives_variety_forests <- readRDS(
+    here("model_output", "gen_crf_list.rds")
+  )
+} else {
+  genitives_variety_forests <- lapply(
+    data_genitives_split, function(x) fit_party_crf(gen_f3, x)
+  )
+  saveRDS(genitives_variety_forests, here("model_output", "gen_crf_list.rds"))
+}
+```
+
+Now get the (unconditional) variable importance scores.
+
+```{r}
+#| label: gens-data-split-varimp
+if(file.exists(here("model_output", "gen_crf_varimps.rds"))){
+  genitives_variety_varimps <- readRDS(
+    here("model_output", "gen_crf_varimps.rds")
+  )
+} else {
+  genitives_variety_varimps <- lapply(
+    genitives_variety_forests, function(x) get_party_varimp(x)$values
+  )
+  saveRDS(genitives_variety_varimps, here("model_output", "gen_crf_varimps.rds"))
+}
+```
+
+Create **Figure 5.2** showing by-variety variable importance.
+
+```{r}
+#| label: fig-gens-5.2
+#| fig-cap: "Conditional Random Forest permutation variable importance ranking of constraints on the genitive alternation by variety of English."
+#| fig-width: 7
+#| fig-height: 6
+#| code-fold: true
+preds <- genitives_variety_varimps[[1]] |> 
+  sort() |> 
+  names()
+
+lapply(seq_along(genitives_variety_varimps), 
+  function(i) {
+    x <- genitives_variety_varimps[[i]]
+    x |> 
+      as.data.frame() |> 
+      rename(Varimp = 1) |> 
+      rownames_to_column("Variable") |> 
+      mutate(Variable = factor(Variable, levels = preds)) |> 
+    # bind_rows() |> 
+    # mutate(
+    #   Variety = rep(names(genitives_variety_varimps), each = 9)
+    # ) |> 
+      ggplot(aes(Variable, Varimp)) +
+      geom_hline(yintercept = 0) +
+      geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+      geom_point(col = "black") +
+      coord_flip() +
+      # facet_wrap(~Variety, ncol = 3) +
+      theme_cup() +
+      labs(x = "", y = "", title = names(genitives_variety_varimps)[i])
+    }) |> 
+  wrap_plots(ncol = 3) +
+  plot_annotation(caption = "Click to enlarge")
+```
+
+
+
+```{r}
+#| echo: false
+# remove large elements and clear memory
+invisible(gc(verbose = FALSE))
+```
+
+
+### Variety interactions in mixed-effects regression model
+
+Next fit a generalized mixed-effects regression model to the genitives dataset. 
+
+Set reference levels.
+
+```{r}
+data_genitives$Response <- relevel(data_genitives$Response, ref = "of")
+data_genitives$PorAnimacyBin <- relevel(data_genitives$PorAnimacyBin, ref = "inanimate")
+data_genitives$PorNPexprTypeBin <- relevel(data_genitives$PorNPexprTypeBin, ref = "other")
+data_genitives$PorFinalSibilancy <- relevel(data_genitives$PorFinalSibilancy, ref = "final_sibilant_absent")
+```
+
+Formula for genitives.
+
+```{r}
+f_reg_gens <- Response ~
+  PorAnimacyBin +
+  PorLength +
+  PumLength +
+  PorNPexprTypeBin +
+  PorFinalSibilancy +
+  variety_of_E +
+
+  PorAnimacyBin : variety_of_E +
+  PorFinalSibilancy : variety_of_E +
+
+  (1|FileID_pruned) +
+  (1|PumHeadLemma_pruned)
+```
+
+Set controls for `glmer()`
+
+```{r}
+glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7))
+```
+
+Fit mixed-effects logistic regression model:
+
+```{r}
+#| label: glmer-gens1
+#| cache: true
+if(!file.exists(here("model_output", "gens_glmer1.rds"))){
+  glmer_genitives1 <- glmer(f_reg_gens, data = data_genitives, 
+                            family = binomial, control = glmer_ctrl)
+  saveRDS(glmer_genitives1, here("model_output", "gens_glmer1.rds"))
+} else {
+    glmer_genitives1 <- readRDS(here("model_output", "gens_glmer1.rds"))
+}
+```
+
+
+Check the model fit.
+
+```{r}
+performance::model_performance(glmer_genitives1)
+```
+
+Precision and recall.
+
+```{r}
+data_genitives$fitted_glmer1 <- fitted(glmer_genitives1)
+data_genitives$predicted_glmer1 <- as.factor(ifelse(data_genitives$fitted_glmer1 >= .5, "s", "of"))
+caret::confusionMatrix(data_genitives$predicted_glmer1, data_genitives$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve.
+
+```{r}
+data.frame(
+  obs = data_genitives$Response,
+  pred = data_genitives$predicted_glmer1,
+  of = 1 - data_genitives$fitted_glmer1,
+  s = data_genitives$fitted_glmer1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_genitives$Response))
+```
+
+Check multicollinearity. Lower scores are better
+
+```{r}
+kappa_mer(glmer_genitives1)
+```
+
+```{r}
+performance::check_collinearity(glmer_genitives1)
+```
+
+Check for overdispersion.
+
+```{r}
+performance::check_overdispersion(glmer_genitives1)
+```
+
+Create **Table 5.2** of regression model effects in the genitive alternation.
+
+
+```{r}
+#| label: tbl-gen-glmer-coefs
+#| tbl-cap: "The genitive alternation: fixed effect coefficients in mixed-effects logistic regression analysis. Predicted odds are for the s-genitive. Percent correctly predicted: 83.7 percent (baseline: 70.5 percent). *C* = 0.90. *&kappa;* = 22.9. Only significant coefficients are shown."
+#| cache: false
+parameters::model_parameters(glmer_genitives1, effects = "fixed", verbose = FALSE) |> 
+  filter(p < 0.05) |> 
+  as.data.frame() |> 
+  select(c(1:3,7,9)) |> 
+  knitr::kable(digits = 3) |> 
+  kableExtra::kable_styling()
+```
+
+
+
+
+
+
+Now we plot the partial effects plot for `PorAnimacyBin:variety_of_E` (5.3) and `PorFinalSibilancy:variety_of_E`  interactions:
+
+**Figure 5.3**
+
+```{r}
+#| label: fig-gens-5.3
+#| fig-cap: "Partial effects plot of the interaction of Variety_of_E with PorAnimacyBin in the genitive regression model. Predicted probabilities (vertical axis, expressed in %) are for the s-genitive. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. BrE (shaded) serves as the reference variety in the underlying regression model. Varieties to the left are Inner Circle varieties, varieties to the right are Outer Circle varieties."
+#| fig-width: 7
+#| fig-height: 6
+#| code-fold: true
+gen_var_anim_partial_eff <- effects::Effect(c("variety_of_E", "PorAnimacyBin"), glmer_genitives1) |> 
+  as.data.frame() |> 
+  mutate(
+    variety_of_E = factor(variety_of_E, levels = var_levs),
+    PorAnimacyBin = relevel(PorAnimacyBin, ref = "animate")
+  ) 
+
+gen_var_anim_partial_eff |> 
+  ggplot(aes(variety_of_E, fit, shape = PorAnimacyBin)) +
+  geom_vline(aes(xintercept = variety_of_E), color = "gray", linetype = "dashed") + 
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+                width = .2, position = position_dodge(width = .4)) +
+  annotate("rect", xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+         alpha = 0.2, fill = c("gray")) +
+  geom_point(size=4, position = position_dodge(width = .4), fill = "white") +
+  labs(y="Predicted probability of s-genitive", x="Variety", title="") +
+  scale_shape_manual(name = "PorAnimacyBin", values = c(21, 16)) +
+  theme_cup() +
+  theme(#plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title   = element_blank(),
+    axis.title.x = element_text(size=14, vjust=-0.5),
+    axis.text.x  = element_text(size=14,angle=90, hjust=1, vjust=0.5),
+    axis.title.y = element_text(size=14, vjust=1.5),
+    legend.position = "top") +
+  scale_y_continuous(label = scales::percent)
+```
+
+**Figure 5.4**
+
+```{r}
+#| label: fig-gens-5.4
+#| fig-cap: "Partial effects plot of the interaction of Variety_of_E with PorFinalSibilancy in the genitive regression model. Predicted probabilities (vertical axis, expressed in %) are for the s-genitive. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. BrE (shaded) serves as the reference variety in the underlying regression model. Varieties to the left are Inner Circle varieties, varieties to the right are Outer Circle varieties."
+#| fig-width: 7
+#| fig-height: 6
+#| code-fold: true
+gen_var_sib_partial_eff <- effects::Effect(c("variety_of_E", "PorFinalSibilancy"), glmer_genitives1) |> 
+  as.data.frame() |> 
+  mutate(
+    variety_of_E = factor(variety_of_E, levels = var_levs)
+  ) 
+gen_var_sib_partial_eff |>
+  ggplot(aes(variety_of_E, fit, shape = PorFinalSibilancy)) +
+  geom_vline(aes(xintercept = variety_of_E), color = "gray", linetype = "dashed") +
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+    width = .2, position = position_dodge(width = .4)
+  ) +
+  annotate("rect",
+    xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+    alpha = 0.2, fill = c("gray")
+  ) +
+  geom_point(size = 4, position = position_dodge(width = .4), fill = "white") +
+  labs(y = "Predicted probability of s-genitive", x = "Variety", title = "") +
+  scale_shape_manual(name = "PorFinalSibilancy", values = c(16, 21)) +
+  theme_cup() +
+  theme( # plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title = element_blank(),
+    axis.title.x = element_text(size = 14, vjust = -0.5),
+    axis.text.x = element_text(size = 14, angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_text(size = 14, vjust = 1.5),
+    legend.position = "top"
+  ) +
+  scale_y_continuous(label = scales::percent)
+```
+
+
+## 5.3 Dative alternation
+
+Cross tabulate response and variety of English.
+
+```{r}
+#| label: tbl-dat-crosstab
+#| tbl-cap: "Variant rates of dative constructions across varieties of English. Upper half of the table: Inner Circle varieties of English; lower half of the table: Outer Circle varieties of English."
+table(data_datives$variety_of_E, data_datives$Response) |>
+  make_prop_table() |> 
+  kable() |>
+  kable_styling()
+```
+
+### Variable importance in global random forest model
+
+Now fit random forest to the dataset. Again, save output for reloading.
+
+```{r}
+#| label: crf-dats-fmla
+# formula
+dat_f1 <- Response ~
+  logWeightRatio +
+  RecPron +
+  ThemeBinComplexity +
+  ThemeHeadFreq +
+  ThemePron +
+  ThemeDefiniteness +
+  RecGivenness +
+  RecHeadFreq
+dat_f2 <- update(dat_f1, .~. + Variety + Circle + GenreCoarse)
+dat_f3 <- update(dat_f1, .~. + GenreCoarse)
+```
+
+Run the forest.
+
+```{r}
+#| label: crf-dats1
+#| cache: true
+#| eval: false
+
+if(!file.exists(here("model_output", "dat_forest1.rds"))){
+    dat_forest1 <- party::cforest(dat_f2, data_datives)
+    saveRDS(dat_forest1, here("model_output", "dat_forest1.rds"))
+  } else {
+    dat_forest1 <- here("model_output", "dat_forest1.rds") |> 
+      readRDS()
+  }
+invisible(gc(verbose = FALSE)) # garbage collect to save RAM
+```
+
+Get predictions.
+
+```{r}
+#| label: crf-dats1-preds
+#| cache: true
+if(!file.exists(here("model_output", "dat_forest1_preds.rds"))){
+    dat_forest1_preds <- unlist(party::treeresponse(dat_forest1))[c(FALSE, TRUE)]
+    saveRDS(dat_forest1_preds, here("model_output", "dat_forest1_preds.rds"))
+  } else {
+    dat_forest1_preds <- here("model_output", "dat_forest1_preds.rds") |> 
+      readRDS()
+  }
+invisible(gc(verbose = FALSE))
+```
+
+Check predictive performance.
+
+```{r}
+data_datives$fitted_crf1 <- dat_forest1_preds
+data_datives$predicted_crf1 <- as.factor(ifelse(data_datives$fitted_crf1 >= .5, "pd", "do"))
+caret::confusionMatrix(data_datives$predicted_crf1, data_datives$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve.
+
+```{r}
+data.frame(
+  obs = data_datives$Response,
+  pred = data_datives$predicted_crf1,
+  do = 1 - data_datives$fitted_crf1,
+  pd = data_datives$fitted_crf1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_datives$Response))
+```
+
+Calculate (unconditional) variable importance.
+
+```{r}
+#| label: crf-dats1-varimp
+#| cache: true
+if(!file.exists(here("model_output", "dat_forest1_varimp.rds"))){
+    dat_forest1_varimp <- permimp(dat_forest1, conditional = FALSE, progressBar = FALSE, asParty = TRUE)
+    saveRDS(dat_forest1_varimp, here("model_output", "dat_forest1_varimp.rds"))
+  } else {
+    dat_forest1_varimp <- here("model_output", "dat_forest1_varimp.rds") |> 
+      readRDS()
+  }
+```
+
+Create **Figure 5.5**
+
+```{r}
+#| label: fig-dats-5.5
+#| fig-cap: "CRF permutation variable importance ranking for the pooled dative dataset. *C* = 0.97."
+#| fig-width: 5
+#| fig-height: 4
+dat_forest1_varimp$values |> 
+  as.data.frame() |> 
+  rename(Varimp = "dat_forest1_varimp$values") |> 
+  rownames_to_column("Variable") |> 
+  ggplot(aes(reorder(Variable, Varimp), Varimp)) +
+  geom_hline(yintercept = 0) +
+  geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+  geom_point(col = "black") +
+  coord_flip() +
+  theme_cup() +
+  labs(x = "", y = "Variable Importance")
+```
+
+### Variable importance in by-variety random forest models
+
+Next we fit CRFs to each variety individually, and calculate variable importance per variety. 
+
+```{r}
+#| label: dats-data-split
+data_datives_split <- split(data_datives, data_datives$variety_of_E)
+```
+
+Fit random forest for each variety.
+
+```{r}
+#| label: dats-data-split-crf
+#| cache: true
+if(file.exists(here("model_output", "datives_variety_forests.rds"))){
+  datives_variety_forests <- readRDS(
+    here("model_output", "datives_variety_forests.rds")
+  )
+} else {
+  datives_variety_forests <- lapply(
+    data_datives_split, function(x) fit_party_crf(dat_f3, x)
+  )
+  saveRDS(datives_variety_forests, here("model_output", "datives_variety_forests.rds"))
+}
+```
+
+Get the variable importances.
+
+```{r}
+#| label: dats-data-split-varimp
+#| cache: true
+if(file.exists(here("model_output", "datives_variety_varimps.rds"))){
+  datives_variety_varimps <- readRDS(
+    here("model_output", "datives_variety_varimps.rds")
+  )
+} else {
+  datives_variety_varimps <- lapply(
+    datives_variety_forests, function(x) get_party_varimp(x)$values
+  )
+  saveRDS(datives_variety_varimps, here("model_output", "datives_variety_varimps.rds"))
+}
+```
+
+Create **Figure 5.6**
+
+```{r}
+#| label: fig-dats-5.6
+#| fig-cap: "CRF permutation variable importance ranking of constraints on the dative alternation by variety of English."
+#| fig-width: 7
+#| fig-height: 7
+#| code-fold: true
+preds <- datives_variety_varimps[[1]] |> 
+  sort() |> 
+  names()
+
+lapply(seq_along(datives_variety_varimps), 
+  function(i) {
+    x <- datives_variety_varimps[[i]]
+    x |> 
+      as.data.frame() |> 
+      rename(Varimp = 1) |> 
+      rownames_to_column("Variable") |> 
+      mutate(Variable = factor(Variable, levels = preds)) |> 
+    # bind_rows() |> 
+    # mutate(
+    #   Variety = rep(names(genitives_variety_varimps), each = 9)
+    # ) |> 
+      ggplot(aes(Variable, Varimp)) +
+      geom_hline(yintercept = 0) +
+      geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+      geom_point(col = "black") +
+      coord_flip() +
+      # facet_wrap(~Variety, ncol = 3) +
+      theme_cup() +
+      labs(x = "", y = "", title = names(datives_variety_varimps)[i])
+    }) |> 
+  wrap_plots(ncol = 3) +
+  plot_annotation(caption = "Click to enlarge")
+```
+
+
+### Variety interactions in mixed-effects regression model
+
+Next fit a generalized mixed-effects regression model to the data.
+
+Set reference levels.
+
+```{r}
+data_datives$Response <- relevel(data_datives$Response, ref = "do")
+data_datives$ThemeBinComplexity <- relevel(data_datives$ThemeBinComplexity, ref = "simple") # Unlike in Mel's PhD
+data_datives$RecPron <- relevel(data_datives$RecPron, ref = "non-pron") # unlike in Mel's PhD
+data_datives$ThemePron <- relevel(data_datives$ThemePron, ref = "non-pron") # as with RecPron
+```
+
+Formula.
+
+```{r}
+f_reg_dats <- Response ~
+  logWeightRatio +
+  RecPron +
+  ThemeDefiniteness +
+  ThemeHeadFreq +
+  ThemePron +
+  variety_of_E +
+
+  logWeightRatio : variety_of_E + # According to Melanie's PhD, interacts with Variety
+  RecPron : variety_of_E +        # According to Melanie's PhD, interacts with Variety
+
+  (1|FileID_pruned) +
+  (1|Verb_pruned)
+```
+
+Fit mixed-effects logistic regression model.
+
+```{r}
+#| label: glmer-dats1
+#| cache: true
+glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7))
+
+if(!file.exists(here("model_output", "dat_glmer1.rds"))){
+  glmer_datives1 <- glmer(f_reg_dats, data_datives, family = binomial, control = glmer_ctrl)
+  saveRDS(glmer_datives1, here("model_output", "dat_glmer1.rds"))
+} else {
+    glmer_datives1 <- readRDS(here("model_output", "dat_glmer1.rds"))
+}
+```
+
+Performance measures of model.
+
+```{r}
+model_performance(glmer_datives1)
+```
+
+Precision and recall:
+
+```{r}
+data_datives$fitted_glmer1 <- fitted(glmer_datives1)
+data_datives$predicted_glmer1 <- as.factor(ifelse(data_datives$fitted_glmer1 >= .5, "pd", "do"))
+caret::confusionMatrix(data_datives$predicted_glmer1, data_datives$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve:
+
+```{r}
+data.frame(
+  obs = data_datives$Response,
+  pred = data_datives$predicted_glmer1,
+  do = 1 - data_datives$fitted_glmer1,
+  pd = data_datives$fitted_glmer1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_datives$Response))
+```
+
+Check for multicollinearity.
+
+```{r}
+kappa_mer(glmer_datives1)
+```
+
+```{r}
+check_collinearity(glmer_datives1)
+```
+
+Check for overdispersion.
+
+```{r}
+performance::check_overdispersion(glmer_datives1)
+```
+
+Create **Table 5.4** of regression model effects in the dative alternation.
+
+```{r}
+#| label: tbl-dat-glmer
+#| tbl-cap: "The dative alternation: fixed effect coefficients in mixed-effects logistic regression analysis. Predicted odds are for the prepositional dative construction. Percent correctly predicted: 88.8 percent (baseline: 68.2 percent). *C* = 0.95. *&kappa;* = 42.1. Only significant coefficients are shown."
+model_parameters(glmer_datives1, effects = "fixed", verbose = FALSE) |> 
+  filter(p < 0.05) |> 
+  as.data.frame() |> 
+  select(c(1:3,7,9)) |> 
+  kable(digits = 3) |> 
+  kable_styling()
+```
+
+Create **Figure 5.7**
+
+```{r}
+#| label: fig-dats-5.7
+#| fig-cap: "Partial effects plot of the interaction of Variety_of_E with RecPron in the genitive regression model. Predicted probabilities (vertical axis, expressed in %) are for the s-genitive. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. BrE (shaded) serves as the reference variety in the underlying regression model. Varieties to the left are Inner Circle varieties, varieties to the right are Outer Circle varieties."
+#| fig-width: 7
+#| fig-height: 6
+#| code-fold: true
+dat_var_anim_partial_eff <- ggeffect(glmer_datives1, c("variety_of_E", "RecPron")) |> 
+  as.data.frame() |> 
+  mutate(
+    variety_of_E = factor(x, levels = var_levs)
+  ) 
+
+dat_var_anim_partial_eff |> 
+  ggplot(aes(variety_of_E, predicted, shape = group)) +
+  geom_vline(aes(xintercept = variety_of_E), color = "gray", linetype = "dashed") + 
+  geom_errorbar(aes(ymin=conf.low,ymax=conf.high),
+                width = .2, position = position_dodge(width = .4)) +
+  annotate("rect", xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+         alpha = 0.2, fill = c("gray")) +
+  geom_point(size=4, position = position_dodge(width = .4), fill = "white") +
+  labs(y="Predicted probability of s-genitive", x="Variety", title="") +
+  scale_shape_manual(name = "PorAnimacyBin", values = c(16, 21)) +
+  theme_cup() +
+  theme(#plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title   = element_blank(),
+    axis.title.x = element_text(size=14, vjust=-0.5),
+    axis.text.x  = element_text(size=14,angle=90, hjust=1, vjust=0.5),
+    axis.title.y = element_text(size=14, vjust=1.5),
+    legend.position = "top") +
+  scale_y_continuous(label = scales::percent)
+```
+
+
+## 5.4 Particle placement alternation
+
+Cross tabulate response and variety of English.
+
+```{r}
+#| label: tbl-pv-crosstab
+#| tbl-cap: "Variant rates of particle placement constructions across varieties of English. Upper half of the table: Inner Circle varieties of English; lower half of the table: Outer Circle varieties of English."
+table(data_particle_verbs$variety_of_E, data_particle_verbs$Response) |>
+  make_prop_table() |> 
+  kable() |>
+  kable_styling()
+```
+
+
+
+### Variable importance in Global random forest model
+
+Now fit conditional random forest to the datasets. 
+
+```{r}
+#| label: crf-pv-fmla
+# formula
+pv_f1 <- Response ~
+  DirObjLettLength +
+  DirObjDefiniteness +
+  DirObjGivenness +
+  DirObjConcreteness +
+  DirObjThematicity +
+  DirectionalPP +
+  Semantics +
+  Surprisal.P
+  
+pv_f2 <- update(pv_f1, .~. + variety_of_E + Circle + GenreCoarse)
+pv_f3 <- update(pv_f1, .~. + GenreCoarse)
+```
+
+Run the forest.
+
+```{r}
+#| label: crf-pv1
+#| cache: true
+if(!file.exists(here("model_output", "pv_forest1.rds"))){
+    pv_forest1 <- party::cforest(pv_f2, data_particle_verbs)
+    saveRDS(pv_forest1, here("model_output", "pv_forest1.rds"))
+  } else {
+    pv_forest1 <- here("model_output", "pv_forest1.rds") |> 
+      readRDS()
+  }
+invisible(gc(verbose = FALSE)) # garbage collect to save RAM
+
+```
+
+Get predictions.
+
+```{r}
+#| label: crf-pv1-preds
+#| cache: true
+if(!file.exists(here("model_output", "pv_forest1_preds.rds"))){
+    pv_forest1_preds <- unlist(party::treeresponse(pv_forest1))[c(FALSE, TRUE)]
+    saveRDS(pv_forest1_preds, here("model_output", "pv_forest1_preds.rds"))
+  } else {
+    pv_forest1_preds <- here("model_output", "pv_forest1_preds.rds") |> 
+      readRDS()
+  }
+invisible(gc(verbose = FALSE))
+```
+
+Check predictive performance.
+
+```{r}
+data_particle_verbs$fitted_crf1 <- pv_forest1_preds
+data_particle_verbs$predicted_crf1 <- as.factor(ifelse(data_particle_verbs$fitted_crf1 >= .5, "Split", "Continuous"))
+caret::confusionMatrix(data_particle_verbs$predicted_crf1, data_particle_verbs$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve.
+
+```{r}
+data.frame(
+  obs = data_particle_verbs$Response,
+  pred = data_particle_verbs$predicted_crf1,
+  Continuous = 1 - data_particle_verbs$fitted_crf1,
+  Split = data_particle_verbs$fitted_crf1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_particle_verbs$Response))
+```
+
+Variable importance.
+
+```{r}
+#| label: crf-pv1-varimp
+#| cache: true
+if(!file.exists(here("model_output", "pv_forest1_varimp.rds"))){
+    pv_forest1_varimp <- permimp(pv_forest1, conditional = FALSE, progressBar = FALSE, asParty = TRUE)
+    saveRDS(pv_forest1_varimp, here("model_output", "pv_forest1_varimp.rds"))
+  } else {
+    pv_forest1_varimp <- here("model_output", "pv_forest1_varimp.rds") |> 
+      readRDS()
+  }
+```
+
+
+Create **Figure 5.8**
+
+```{r}
+#| label: fig-pv-5.8
+#| fig-cap: "Conditional Random Forest permutation variable importance ranking for the pooled particle placement dataset. C = 0.94."
+#| fig-width: 5
+#| fig-height: 4
+pv_forest1_varimp$values |> 
+  as.data.frame() |> 
+  rename(Varimp = "pv_forest1_varimp$values") |> 
+  rownames_to_column("Variable") |> 
+  ggplot(aes(reorder(Variable, Varimp), Varimp)) +
+  geom_hline(yintercept = 0) +
+  geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+  geom_point(col = "black") +
+  coord_flip() +
+  theme_cup() +
+  labs(x = "", y = "Variable Importance")
+```
+
+### Variable importance in by-variety random forest models
+
+Next we fit CRFs to each variety individually. 
+
+```{r}
+#| label: pv-data-split
+data_particle_verbs_split <- split(data_particle_verbs, data_particle_verbs$variety_of_E)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: pv-data-split-crf
+#| cache: true
+if(file.exists(here("model_output", "pv_variety_forests.rds"))){
+  pv_variety_forests <- readRDS(
+    here("model_output", "datives_variety_forests.rds")
+  )
+} else {
+  pv_variety_forests <- lapply(
+    data_particle_verbs_split, function(x) fit_party_crf(pv_f3, x)
+  )
+  saveRDS(pv_variety_forests, here("model_output", "pv_variety_forests.rds"))
+}
+```
+
+Now get the variable importances.
+
+```{r}
+#| label: pv-data-split-varimp
+#| cache: true
+if(file.exists(here("model_output", "pv_variety_varimps.rds"))){
+  pv_variety_varimps <- readRDS(
+    here("model_output", "pv_variety_varimps.rds")
+  )
+} else {
+  pv_variety_varimps <- lapply(
+    pv_variety_forests, function(x) get_party_varimp(x)$values
+  )
+  saveRDS(pv_variety_varimps, here("model_output", "pv_variety_varimps.rds"))
+}
+```
+
+Create **Figure 5.9**
+
+```{r}
+#| label: fig-pv-5.9
+#| fig-cap: "Conditional Random Forest permutation variable importance ranking of constraints on the particle placement alternation by variety of English."
+#| fig-width: 7
+#| fig-height: 6
+#| code-fold: true
+preds <- pv_variety_varimps[[1]] |> 
+  sort() |> 
+  names()
+
+lapply(seq_along(pv_variety_varimps), 
+  function(i) {
+    x <- pv_variety_varimps[[i]]
+    x |> 
+      as.data.frame() |> 
+      rename(Varimp = 1) |> 
+      rownames_to_column("Variable") |> 
+      mutate(Variable = factor(Variable, levels = preds)) |> 
+    # bind_rows() |> 
+    # mutate(
+    #   Variety = rep(names(genitives_variety_varimps), each = 9)
+    # ) |> 
+      ggplot(aes(Variable, Varimp)) +
+      geom_hline(yintercept = 0) +
+      geom_segment(aes(xend = Variable, yend = 0), col = "black") +
+      geom_point(col = "black") +
+      coord_flip() +
+      # facet_wrap(~Variety, ncol = 3) +
+      theme_cup() +
+      labs(x = "", y = "", title = names(pv_variety_varimps)[i])
+    }) |> 
+  wrap_plots(ncol = 3) +
+  plot_annotation(caption = "Click to enlarge")
+```
+
+
+### Variety interactions in mixed effects regression model
+
+Next fit a generalized mixed-effects regression model to the data. 
+
+```{r}
+data_particle_verbs$Response <- relevel(data_particle_verbs$Response, ref = "Continuous") # predicted odds are for the split pattern
+data_particle_verbs$Semantics <- relevel(data_particle_verbs$Semantics, ref = "non-compositional")
+data_particle_verbs$DirectionalPP <- relevel(data_particle_verbs$DirectionalPP, ref = "no")
+data_particle_verbs$Circle <- relevel(data_particle_verbs$Circle, ref = "Inner")
+```
+
+Formula.
+
+```{r}
+f_reg_pv <- Response ~
+  Surprisal.P +
+  DirObjLettLength +
+  Semantics +
+  DirectionalPP +
+  DirObjThematicity +
+  Circle +
+
+  DirectionalPP : Circle+ 
+  Semantics : Circle + 
+
+  (1|variety_of_E) +
+  (1|FileID_pruned) +
+  (1|VerbPart_pruned)
+```
+
+Fit mixed-effects logistic regression model:
+
+```{r}
+#| label: glmer-pv1
+#| cache: true
+glmer_ctrl <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7))
+
+if(!file.exists(here("model_output", "pv_glmer1.rds"))){
+  glmer_particle_verbs1 <- glmer(f_reg_pv, data_particle_verbs, family = binomial, control = glmer_ctrl)
+  saveRDS(glmer_particle_verbs1, here("model_output", "pv_glmer1.rds"))
+} else {
+    glmer_particle_verbs1 <- readRDS(here("model_output", "pv_glmer1.rds"))
+}
+```
+
+Performance measures of model.
+
+```{r}
+model_performance(glmer_particle_verbs1)
+```
+
+Precision and recall.
+
+```{r}
+data_particle_verbs$fitted_glmer1 <- fitted(glmer_particle_verbs1)
+data_particle_verbs$predicted_glmer1 <- as.factor(ifelse(data_particle_verbs$fitted_glmer1 >= .5, "Split", "Continuous"))
+caret::confusionMatrix(data_particle_verbs$predicted_glmer1, data_particle_verbs$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve.
+
+```{r}
+data.frame(
+  obs = data_particle_verbs$Response,
+  pred = data_particle_verbs$predicted_glmer1,
+  Continuous = 1 - data_particle_verbs$fitted_glmer1,
+  Split = data_particle_verbs$fitted_glmer1
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_particle_verbs$Response))
+```
+
+Check multicollinearity
+
+```{r}
+kappa_mer(glmer_particle_verbs1)
+```
+
+```{r}
+performance::check_collinearity(glmer_particle_verbs1)
+```
+
+Check overdispersion.
+
+```{r}
+performance::check_overdispersion(glmer_particle_verbs1)
+```
+
+Create **Table 5.6** of regression model effects in the particle placement alternation.
+
+```{r}
+#| label: tbl-pv-glmer-coeffs
+#| tbl-cap: "The particle placement alternation: fixed effect coefficients in mixed-effects logistic regression analysis. Predicted odds are for the split variant. Percent correctly predicted: 84.5 percent (baseline: 78.5 percent). *C* = 0.88. *&kappa;* = 7.14. Only significant coefficients are shown."
+model_parameters(glmer_particle_verbs1, effects = "fixed", verbose = FALSE) |> 
+  filter(Parameter == "(Intercept)" | p < 0.05) |> 
+  as.data.frame() |> 
+  select(c(1:3,7,9)) |> 
+  kable(digits = 3) |> 
+  kable_styling()
+```
+
+
+Create **Figure 5.10**, the barplot of by-variety intercept adjustments.
+
+```{r}
+#| label: fig-pv-adjust-5.10
+#| fig-cap: "Intercept adjustments for the random effect `VARIETY_OF_E`. Predicted odds are for the split variant"
+#| fig-width: 3.5
+#| fig-height: 4
+nms <- rownames(ranef(glmer_particle_verbs1)$variety_of_E)
+intercepts <- ranef(glmer_particle_verbs1)$variety_of_E[,1]
+support <- tapply(data_particle_verbs$variety_of_E, data_particle_verbs$variety_of_E,length)
+labels <- paste(nms)
+barplot(intercepts[order(intercepts)],names.arg=labels[order(intercepts)],horiz=FALSE, las=2, cex.names=0.8,family = "serif")
+```
+
+Create **Figure 5.11**, the partial effects plot for `DirectionalPP:Circle` interaction.
+
+```{r}
+#| label: fig-pv-5.11
+#| fig-cap: "Partial effects plot of the interaction of `CIRCLE` with `DIRECTIONALPP` in the particle placement model. Predicted probabilities (vertical axis, expressed in percent) are for the split variant. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. The Inner Circle (shaded) serves as the reference category in the underlying regression model."
+#| fig-width: 4
+#| fig-height: 4
+#| code-fold: true
+pv_var_dirPP_partial_eff <- effects::Effect(c("Circle", "DirectionalPP"), glmer_particle_verbs1) |> 
+  as.data.frame()
+
+pv_var_dirPP_partial_eff |> 
+  ggplot(aes(Circle, fit, shape = DirectionalPP)) +
+  geom_errorbar(aes(ymin=lower,ymax=upper),
+                width = .2, position = position_dodge(width = .4)) +
+  annotate("rect", xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+         alpha = 0.2, fill = c("gray")) +
+  geom_point(size=4, position = position_dodge(width = .4), fill = "white") +
+  labs(y="Predicted probability of split variant", x="Circle", title="") +
+  # scale_shape_manual(name = "PorAnimacyBin", values = c(21, 16)) +
+  theme_cup() +
+  theme(#plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title   = element_blank(),
+    axis.title.x = element_text(size=14, vjust=-0.5),
+    axis.text.x  = element_text(size=14,angle=90, hjust=1, vjust=0.5),
+    axis.title.y = element_text(size=14, vjust=1.5),
+    legend.position = "top") +
+  scale_y_continuous(limits = c(0,.9), breaks = seq(0, .9, .1), label = scales::percent)
+```
+
+
+Create **Figure 5.12**, the partial effects plot for `DirectionalPP:Semantics` interaction.
+
+```{r}
+#| label: fig-pv-5.12
+#| fig-cap: "Partial effects plot of the interaction of `CIRCLE` with `SEMANTICS` in the particle placement model. Predicted probabilities (vertical axis, expressed in percent) are for the split variant. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. The Inner Circle (shaded) serves as the reference category in the underlying regression model."
+#| fig-width: 4
+#| fig-height: 4
+#| code-fold: true
+pv_var_semantics_partial_eff <- effects::Effect(c("Circle", "Semantics"), glmer_particle_verbs1) |> 
+  as.data.frame() |> 
+  mutate(
+    Semantics = factor(Semantics, levels = c("compositional", "non-compositional"))
+  )
+
+pv_var_semantics_partial_eff |> 
+  ggplot(aes(Circle, fit, shape = Semantics)) +
+  geom_errorbar(aes(ymin=lower,ymax=upper),
+                width = .2, position = position_dodge(width = .4)) +
+  annotate("rect", xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+         alpha = 0.2, fill = c("gray")) +
+  geom_point(size=4, position = position_dodge(width = .4), fill = "white") +
+  labs(y="Predicted probability of split variant", x="Circle", title="") +
+  # scale_shape_manual(name = "PorAnimacyBin", values = c(21, 16)) +
+  theme_cup() +
+  theme(#plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title   = element_blank(),
+    axis.title.x = element_text(size=14, vjust=-0.5),
+    axis.text.x  = element_text(size=14,angle=90, hjust=1, vjust=0.5),
+    axis.title.y = element_text(size=14, vjust=1.5),
+    legend.position = "top") +
+  scale_y_continuous(limits = c(0,.9), breaks = seq(0, .9, .1), label = scales::percent)
+```
+
+### Interaction of binary length in mixed effects regression model 
+
+Fit model with binned length.
+
+```{r}
+data_particle_verbs <- data_particle_verbs |> 
+  mutate(
+    DirObjLettLength_bin = ifelse(DirObjLettLength <= 11, "short", "long") |> 
+      as.factor()
+  )
+data_particle_verbs$DirObjLettLength_bin <- relevel(data_particle_verbs$DirObjLettLength_bin, ref = "short")
+```
+
+New model.
+
+```{r}
+#| label: glmer-pv2
+f_reg_pv2 <- Response ~
+  Surprisal.P +
+  DirObjLettLength_bin +
+  Semantics +
+  DirectionalPP +
+  DirObjThematicity +
+  Circle +
+  
+  DirObjLettLength_bin : Circle +
+  DirectionalPP : Circle+ 
+  Semantics : Circle + 
+  
+  (1|variety_of_E) +
+  (1|FileID_pruned) +
+  (1|VerbPart_pruned)
+
+if(!file.exists(here("model_output", "pv_glmer2.rds"))){
+  glmer_particle_verbs2 <- glmer(f_reg_pv2, data_particle_verbs, family = binomial, control = glmer_ctrl)
+  saveRDS(glmer_particle_verbs2, here("model_output", "pv_glmer2.rds"))
+} else {
+    glmer_particle_verbs2 <- readRDS(here("model_output", "pv_glmer2.rds"))
+}
+```
+
+Performance measures of model.
+
+```{r}
+model_performance(glmer_particle_verbs2)
+```
+
+Precision and recall.
+
+```{r}
+data_particle_verbs$fitted_glmer2 <- fitted(glmer_particle_verbs2)
+data_particle_verbs$predicted_glmer2 <- as.factor(ifelse(data_particle_verbs$fitted_glmer2 >= .5, "Split", "Continuous"))
+caret::confusionMatrix(data_particle_verbs$predicted_glmer2, data_particle_verbs$Response,
+                       mode = "prec_recall")
+```
+
+Area under ROC curve.
+
+```{r}
+data.frame(
+  obs = data_particle_verbs$Response,
+  pred = data_particle_verbs$predicted_glmer2,
+  Continuous = 1 - data_particle_verbs$fitted_glmer2,
+  Split = data_particle_verbs$fitted_glmer2
+  ) |> 
+  caret::twoClassSummary(lev = levels(data_particle_verbs$Response))
+```
+
+Check multicollinearity
+
+```{r}
+kappa_mer(glmer_particle_verbs2)
+```
+
+```{r}
+performance::check_collinearity(glmer_particle_verbs2)
+```
+
+Check overdispersion.
+
+```{r}
+performance::check_overdispersion(glmer_particle_verbs2)
+```
+
+
+Create **Figure 5.13**, the partial effects plot for Circle x DirObj length interaction.
+
+```{r}
+#| label: fig-pv-5.13
+#| fig-cap: "Partial effects plot of the interaction of `Circle` with `DirObjLettLength_bin` in the particle placement model. Predicted probabilities (vertical axis, expressed in percent) are for the split variant. Vertical distance between dots is proportional to effect size. The plotted probabilities obtain when all other categorical constraints are set at their default levels, or at 0 in the case of numerical constraints. The Inner Circle (shaded) serves as the reference category in the underlying regression model."
+#| fig-width: 4
+#| fig-height: 4
+#| code-fold: true
+pv_var_length_partial_eff <- effects::Effect(c("Circle", "DirObjLettLength_bin"), glmer_particle_verbs2) |> 
+  as.data.frame() |> 
+  mutate(
+    DirObjLettLength_bin = factor(DirObjLettLength_bin, levels = c("long", "short"))
+  )
+
+pv_var_length_partial_eff |>
+  ggplot(aes(Circle, fit, shape = DirObjLettLength_bin)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+    width = .2, position = position_dodge(width = .4)
+  ) +
+  annotate("rect",
+    xmin = c(0.5), xmax = c(1.5), ymin = -Inf, ymax = Inf,
+    alpha = 0.2, fill = c("gray")
+  ) +
+  geom_point(size = 4, position = position_dodge(width = .4), fill = "white") +
+  labs(y = "Predicted probability of split variant", x = "Circle", title = "") +
+  # scale_shape_manual(name = "PorAnimacyBin", values = c(21, 16)) +
+  theme_cup() +
+  theme( # plot.title = element_text(size=20, face="bold", vjust=2),
+    plot.title = element_blank(),
+    axis.title.x = element_text(size = 14, vjust = -0.5),
+    axis.text.x = element_text(size = 14, angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_text(size = 14, vjust = 1.5),
+    legend.position = "top"
+  ) +
+  scale_y_continuous(limits = c(0, .9), breaks = seq(0, .9, .1), label = scales::percent)
+```
+
+Remove large model objects that we don't need to clean up workspace (optional).
+
+```{r}
+#| label: clean-chap-5
+rm(
+  gen_forest1, genitives_variety_forests, glmer_genitives1, 
+  dat_forest1, datives_variety_forests, glmer_datives1,
+  pv_forest1, pv_variety_forests, glmer_particle_verbs1, glmer_particle_verbs2
+  )
+invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+
+
+# Chapter 6
+
+In this chapter we run the Variation-Based Distance & Similarity Modeling (VADIS) analyses of the three alternations. Note that because line 3 variable importance scores are based on random forest models, results will vary from run to run. We recommend tuning models before running, and setting random seeds for exact reproducibility (not done here).
+
+## 6.4 Quantification of Similarity Coefficients
+
+The code here shows only the analysis for the entire datasets. See @#sec-append-6.4 in the Appendix for the code for the subsets of the data (spoken/written only, Inner/Outer Circle only).
+
+### All available data
+
+Start with the **GENITIVE alternation**. First run the by-variety regression models.
+
+```{r}
+#| label: gens-vadis-glmer-all
+# Add random effects
+gen_f4 <- update(gen_f1, .~. + (1|PorHeadLemma_pruned) + (1|GenreCoarse))
+
+if(!file.exists(here("model_output", "gen_glmer_list.rds"))){
+  genitives_variety_glmer <- vector("list")
+  for (i in seq_along(data_genitives_split)){
+    d <- data_genitives_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = gen_f4) # use the fitting function for convenience
+    # fit the model
+    genitives_variety_glmer[[i]] <- glmer(gen_f4, data = d_std, family = binomial, # set optimizer controls to help convergence 
+                             control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7)))
+    rm(d, d_std) # remove datasets
+  }
+  names(genitives_variety_glmer) <- names(data_genitives_split)
+  saveRDS(genitives_variety_glmer, here("model_output", "gen_glmer_list.rds"))
+} else {
+  genitives_variety_glmer <- readRDS(here("model_output", "gen_glmer_list.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(genitives_variety_glmer), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf-vadis-all
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_vadis_list.rds"))){
+  genitives_variety_forests_vadis <- readRDS(
+    here("model_output", "gen_crf_vadis_list.rds")
+  )
+} else {
+  genitives_variety_forests_vadis <- lapply(
+    data_genitives_split, function(x) fit_party_crf(gen_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(genitives_variety_forests_vadis, here("model_output", "gen_crf_vadis_list.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+gen_signif_line <- vadis_line1(genitives_variety_glmer, path = here("model_output", "gens_line1.rds"),
+                               overwrite = "reload")
+gen_coef_line <- vadis_line2(genitives_variety_glmer, path = here("model_output", "gens_line2.rds"),
+                               overwrite = "reload")
+gen_varimp_line <- vadis_line3(genitives_variety_forests_vadis, path = here("model_output", "gens_line3.rds"), 
+                               conditional = FALSE, overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+gen_mean_sims <- data.frame(
+  line1 = gen_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = gen_coef_line$similarity.scores[,1],
+  line3 = gen_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+gen_mean_sims$Variety_Mean <- rowMeans(gen_mean_sims)
+rownames(gen_mean_sims) <- c(names(data_genitives_split), "Line Mean")
+round(gen_mean_sims, 3)
+```
+
+Next the **DATIVE alternation**.
+
+```{r}
+#| label: dat-vadis-glmer-all
+# Add random effects
+dat_f4 <- update(dat_f1, .~. + (1|Verb_pruned) + (1|GenreCoarse))
+
+if(!file.exists(here("model_output", "dat_glmer_list.rds"))){
+  datives_variety_glmer <- vector("list")
+  for (i in seq_along(data_datives_split)){
+    d <- data_datives_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = dat_f4) # use the fitting function for convenience
+    # fit the model
+    datives_variety_glmer[[i]] <- glmer(dat_f4, data = d_std, family = binomial, # set optimizer controls to help convergence 
+                             control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7)))
+    rm(d, d_std) # remove datasets
+  }
+  names(datives_variety_glmer) <- names(data_datives_split)
+  saveRDS(datives_variety_glmer, here("model_output", "dat_glmer_list.rds"))
+} else {
+  datives_variety_glmer <- readRDS(here("model_output", "dat_glmer_list.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(datives_variety_glmer), 3)
+```
+
+```{r}
+#| label: dat-data-split-crf-vadis-all
+#| eval: false
+if(file.exists(here("model_output", "dat_crf_vadis_list.rds"))){
+  datives_variety_forests_vadis <- readRDS(
+    here("model_output", "dat_crf_vadis_list.rds")
+  )
+} else {
+  datives_variety_forests_vadis <- lapply(
+    data_datives_split, function(x) fit_party_crf(dat_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(datives_variety_forests_vadis, here("model_output", "dat_crf_vadis_list.rds"))
+}
+```
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+dat_signif_line <- vadis_line1(datives_variety_glmer, path = here("model_output", "dat_line1.rds"),
+                               overwrite = "reload")
+dat_coef_line <- vadis_line2(datives_variety_glmer, path = here("model_output", "dat_line2.rds"),
+                               overwrite = "reload")
+dat_varimp_line <- vadis_line3(datives_variety_forests_vadis, 
+                               path = here("model_output", "dat_line3.rds"), 
+                               conditional = FALSE, overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+dat_mean_sims <- data.frame(
+  line1 = dat_signif_line$similarity.scores[, 1], # get only the values in the 2nd column
+  line2 = dat_coef_line$similarity.scores[, 1],
+  line3 = dat_varimp_line$similarity.scores[, 1]
+) %>% 
+  add_row(!!! colMeans(.))
+dat_mean_sims$Variety_Mean <- rowMeans(dat_mean_sims)
+rownames(dat_mean_sims) <- c(names(data_genitives_split), "Line Mean")
+round(dat_mean_sims, 3)
+```
+
+Finally, the **PARTICLE PLACEMENT alternation**.
+
+```{r}
+#| label: pv-vadis-glmer-all
+# Add random effects
+#f2 <- update(f1, .~. + (1|FileID) + (1|VerbPart_pruned) + (1|DirObjHeadPlain_pruned) + (1|GenreCoarse))
+pv_f4 <- update(pv_f1, .~. + (1|VerbPart_pruned) + (1|Genre))
+
+if(!file.exists(here("model_output", "pv_glmer_list.rds"))){
+  pv_variety_glmer <- vector("list")
+  for (i in seq_along(data_particle_verbs_split)){
+    d <- data_particle_verbs_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = pv_f4) # use the fitting function for convenience
+    # fit the model
+    pv_variety_glmer[[i]] <- glmer(pv_f4, data = d_std, family = binomial, # set optimizer controls to help convergence 
+                             control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e7)))
+    rm(d, d_std) # remove datasets
+  }
+  names(pv_variety_glmer) <- names(data_particle_verbs_split)
+  saveRDS(pv_variety_glmer, here("model_output", "pv_glmer_list.rds"))
+} else {
+  pv_variety_glmer <- readRDS(here("model_output", "pv_glmer_list.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(pv_variety_glmer), 3)
+```
+
+```{r}
+#| label: pv-data-split-crf-vadis-all
+#| eval: false
+if(file.exists(here("model_output", "pv_crf_vadis_list.rds"))){
+  pv_variety_forests_vadis <- readRDS(
+    here("model_output", "pv_crf_vadis_list.rds")
+  )
+} else {
+  pv_variety_forests_vadis <- lapply(
+    data_particle_verbs_split, function(x) fit_party_crf(pv_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(pv_variety_forests_vadis, here("model_output", "pv_crf_vadis_list.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+pv_signif_line <- vadis_line1(pv_variety_glmer, path = here("model_output", "pv_line1.rds"),
+                               overwrite = "reload")
+pv_coef_line <- vadis_line2(pv_variety_glmer, path = here("model_output", "pv_line2.rds"),
+                               overwrite = "reload")
+pv_varimp_line <- vadis_line3(pv_variety_forests_vadis, 
+                              path = here("model_output", "pv_line3.rds"), 
+                              conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+pv_mean_sims <- data.frame(
+  line1 = pv_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = pv_coef_line$similarity.scores[,1],
+  line3 = pv_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+pv_mean_sims$Variety_Mean <- rowMeans(pv_mean_sims)
+rownames(pv_mean_sims) <- c(names(data_genitives_split), "Line Mean")
+round(pv_mean_sims, 3)
+```
+
+Now create **Table 6.5**
+
+```{r}
+#| label: tbl-sim-coeffs-all
+#| tbl-cap: "Similarity coefficients across lines of evidence and alternations. Input dataset: all available data. Coefficients range between 0 (total dissimilarity) and 1 (total similarity)."
+tab <- data.frame(
+  Genitives = unlist(gen_mean_sims[10, ]),
+  Datives = unlist(dat_mean_sims[10, ]),
+  `Particle placement` = unlist(pv_mean_sims[10, ])
+) 
+rownames(tab) <- c("1st line", "2nd line", "3rd line", "mean")
+kable(tab, digits = 2) |> 
+  kable_styling()
+```
+
+Core Grammar Score:
+
+```{r}
+round(rowMeans(tab[4,]), 3)
+```
+
+For simplicity, we've recreated **Table 6.6** here. Again, all code for the analyses is in @sec-append-6.4.
+
+|                   | Core grammar score (&Gamma;)  | Hierarchy of stability            |
+|-------------------|------------------------------:|-----------------------------------|
+| All data          | 0.76                          | genitives > particles > datives   |
+| Spoken only       | 0.62                          | particles > datives > genitives   |
+| Writen only       | 0.75                          | genitives >  datives > particles  |
+| Inner Circle only | 0.79                          | genitives > particles > datives   |
+| Outer Circle only | 0.73                          | genitives >  datives > particles  |
+
+
+: Core grammar scores (0) and hierarchies of stability for subsets of the data. {#tbl-core-gram2}
+
+
+## 6.5 Evaluating Coherence
+
+Figure 6.1 is shown here. Again, the numbers will vary slightly from run to run due to the random nature of Random Forests.
+
+```{r}
+#| label: fig-pv-line3-dist-mat
+#| fig-cap: "Variation-Based Distance and Similarity Modeling (VADIS) distance matrix for the third line of evidence in the particle placement alternation (all data included, eight constraints considered). Scores range between 0 (maximum similarity) and 1 (maximum distance)."
+#| fig-width: 5
+#| fig-height: 4
+gen_varimp_line$distance.matrix
+```
+
+Compare the Distance-Based Coherence (DBC). Get the fused distance matrices, combining all lines of evidence. Then calculate pairwise correlations between the three alternations.
+
+```{r}
+# genitives across lines of evidence
+dfused_genitives_all <- analogue::fuse(gen_signif_line$distance.matrix, 
+                                       gen_coef_line$distance.matrix, 
+                                       gen_varimp_line$distance.matrix)
+
+# datives across lines of evidence
+dfused_datives_all <- analogue::fuse(dat_signif_line$distance.matrix, 
+                                    dat_coef_line$distance.matrix, 
+                                    dat_varimp_line$distance.matrix)
+
+# particles across lines of evidence
+dfused_particles_all <- analogue::fuse(pv_signif_line$distance.matrix, 
+                                       pv_coef_line$distance.matrix, 
+                                       pv_varimp_line$distance.matrix)
+
+# fusing fused distance matrices across alternations
+dfused_total_all <- analogue::fuse(dfused_genitives_all, 
+                                   dfused_datives_all, 
+                                   dfused_particles_all)
+
+gen_dat_cor <- vegan::mantel(dfused_genitives_all, dfused_datives_all)
+gen_pv_cor <- vegan::mantel(dfused_genitives_all, dfused_particles_all)
+dat_pv_cor <- vegan::mantel(dfused_datives_all, dfused_particles_all)
+```
+
+Create **Table 6.7**.
+
+```{r}
+#| label: tbl-cor-dist-all
+#| tbl-cap: "DBC~alternation~ measurements: Mantel correlation coefficients between fused distance matrices (combining all lines of evidence and based on all available data)."
+data.frame(
+  Comparison = c("genitive / dative", "genitive / particle", "dative / particle"),
+  r = round(c(gen_dat_cor$statistic, gen_pv_cor$statistic, dat_pv_cor$statistic), 2),
+  pval = round(c(gen_dat_cor$signif, gen_pv_cor$signif, dat_pv_cor$signif), 2)
+) |> kable() |> kable_styling()
+```
+
+
+Next calculate by-line pairwise correlations for each alternation, as in **Table 6.8**.
+
+```{r}
+gen_line12 <- vegan::mantel(gen_signif_line$distance.matrix, gen_coef_line$distance.matrix)
+gen_line13 <- vegan::mantel(gen_signif_line$distance.matrix, gen_varimp_line$distance.matrix)
+gen_line23 <- vegan::mantel(gen_coef_line$distance.matrix, gen_varimp_line$distance.matrix)
+
+dat_line12 <- vegan::mantel(dat_signif_line$distance.matrix, dat_coef_line$distance.matrix)
+dat_line13 <- vegan::mantel(dat_signif_line$distance.matrix, dat_varimp_line$distance.matrix)
+dat_line23 <- vegan::mantel(dat_coef_line$distance.matrix, dat_varimp_line$distance.matrix)
+
+pv_line12 <- vegan::mantel(pv_signif_line$distance.matrix, pv_coef_line$distance.matrix)
+pv_line13 <- vegan::mantel(pv_signif_line$distance.matrix, pv_varimp_line$distance.matrix)
+pv_line23 <- vegan::mantel(pv_coef_line$distance.matrix, pv_varimp_line$distance.matrix)
+```
+
+Create **Table 6.8**
+
+```{r}
+#| label: tbl-cor-dist-lines
+#| tbl-cap: "Mantel correlation coefficients between line-of-evidence-specific distance matrices."
+data.frame(
+  Comparison = c("overlap 1st / 2nd lines", "overlap 1st / 3rd lines", "overlap 2nd / 3rd lines"),
+  Genitive = c(
+    paste0("r = ", round(gen_line12$statistic, 2), " (p = ", round(gen_line12$signif, 2), ")"),
+    paste0("r = ", round(gen_line13$statistic, 2), " (p = ", round(gen_line13$signif, 2), ")"),
+    paste0("r = ", round(gen_line23$statistic, 2), " (p = ", round(gen_line23$signif, 2), ")")
+    ),
+  Dative = c(
+    paste0("r = ", round(dat_line12$statistic,2), " (p = ", round(dat_line12$signif, 2), ")"),
+    paste0("r = ", round(dat_line13$statistic,2), " (p = ", round(dat_line13$signif, 2), ")"),
+    paste0("r = ", round(dat_line23$statistic,2), " (p = ", round(dat_line23$signif, 2), ")")
+    ),
+  Particle = c(
+    paste0("r = ", round(pv_line12$statistic,2), " (p = ", round(pv_line12$signif, 2), ")"),
+    paste0("r = ", round(pv_line13$statistic,2), " (p = ", round(pv_line13$signif, 2), ")"),
+    paste0("r = ", round(pv_line23$statistic,2), " (p = ", round(pv_line23$signif, 2), ")")
+    )
+) |> 
+  kable() |> 
+  kable_styling()
+```
+
+## 6.6 Mapping Out (Dis)similarity Relationships
+
+In this section we visualize the distances between varieties using Multidimensional Scaling (MDS) plots, hierarchical clustering dendrograms, and neighbornet diagrams [@bryant_neighbornet_2004].
+
+Create **Figure 6.2** plotting distances based on the 3rd line of evidence for the particle placement alternation.
+
+```{r}
+#| label: fig-mds-pv-line3
+#| fig-cap: "Multidimensional scaling representation of third line distances for the particle placement alternation (see Figure 6.1). Distances between data points in plot is proportional to probabilistic grammar distances between varieties."
+#| fig-width: 5
+#| fig-height: 4
+input <- pv_varimp_line$distance.matrix # specify distance matrix name name
+fit <- cmdscale(input,eig=TRUE, k=2) # k is the number of dim
+fit.df <- as.data.frame(fit[[1]])
+names(fit.df) <- c("x","y")
+fit.df$Variety <- rownames(fit.df) |> as.factor()
+
+ggplot(fit.df, aes(x,y)) +
+    geom_text_repel(aes(label=Variety), size=7, 
+                    box.padding = unit(0.5, "lines"), segment.colour = "grey65") + 
+    geom_point(size=5) + # change dot size here
+    labs(y= "MDS Dimension 2", x="MDS Dimension 1") +
+    theme_cup() +
+    theme(axis.title = element_text(size=15))
+```
+
+Next get the MDS for each alternation.
+
+```{r}
+gen_mds <- cmdscale(dfused_genitives_all, eig = TRUE, k = 2) |> # k is the number of dim
+  first() |> 
+  as.data.frame() |> 
+  rename(x = "V1", y = "V2") |> 
+  rownames_to_column("Variety") 
+
+dat_mds <- cmdscale(dfused_datives_all, eig = TRUE, k = 2) |> # k is the number of dim
+  first() |> 
+  as.data.frame() |> 
+  rename(x = "V1", y = "V2") |> 
+  rownames_to_column("Variety") 
+
+pv_mds <- cmdscale(dfused_particles_all, eig = TRUE, k = 2) |> # k is the number of dim
+  first() |> 
+  as.data.frame() |> 
+  rename(x = "V1", y = "V2") |> 
+  rownames_to_column("Variety") 
+```
+
+
+
+```{r}
+#| label: fig-mds-all-alts
+#| fig-cap: "Multidimensional scaling representation of compromise distances per alternation: a) genitive alternation; b) dative alternation; c) particle placement alternation. Distances between data points in plots is proportional to probabilistic grammar distances between varieties. Boxes depict Inner Circle clusters."
+#| fig-subcap: 
+#|   - ""
+#|   - ""
+#|   - ""
+#| layout-ncol: 1
+
+ggplot(gen_mds, aes(x,y)) +
+    geom_text_repel(aes(label=Variety), size=7, 
+                    box.padding = unit(0.5, "lines"), segment.colour = "grey65") + 
+    geom_point(size=5) + # change dot size here
+    labs(y= "MDS Dimension 2", x="MDS Dimension 1") +
+    theme_cup() +
+    theme(axis.title = element_text(size=15))
+ggplot(dat_mds, aes(x,y)) +
+    geom_text_repel(aes(label=Variety), size=7, 
+                    box.padding = unit(0.5, "lines"), segment.colour = "grey65") + 
+    geom_point(size=5) + # change dot size here
+    labs(y= "MDS Dimension 2", x="MDS Dimension 1") +
+    theme_cup() +
+    theme(axis.title = element_text(size=15))
+ggplot(pv_mds, aes(x,y)) +
+    geom_text_repel(aes(label=Variety), size=7, 
+                    box.padding = unit(0.5, "lines"), segment.colour = "grey65") + 
+    geom_point(size=5) + # change dot size here
+    labs(y= "MDS Dimension 2", x="MDS Dimension 1") +
+    theme_cup() +
+    theme(axis.title = element_text(size=15))
+```
+
+Create **Figure 6.4** showing the MDS of all lines and alternations  
+
+```{r}
+#| label: fig-mds-fused
+#| fig-cap: "Multidimensional scaling representation of the &Gamma;-matrix (a single compromise distance matrix merged across all lines and alternations). Distances between data points in plot is proportional to probabilistic grammar distances between varieties. Box depicts Inner Circle cluster."
+#| fig-width: 5
+#| fig-height: 4
+cmdscale(dfused_total_all, eig = TRUE, k = 2) |> # k is the number of dim
+  first() |> 
+  as.data.frame() |> 
+  rename(x = "V1", y = "V2") |> 
+  rownames_to_column("Variety") |> 
+  ggplot(aes(x, y)) +
+    geom_text_repel(aes(label=Variety), size=7, 
+                    box.padding = unit(0.5, "lines"), segment.colour = "grey65") + 
+    geom_point(size=5) + # change dot size here
+    geom_rect(aes(xmin = -.18, xmax = .4, ymin = -.2, ymax = .1), fill = NA,
+              color = "black") +
+    labs(y= "MDS Dimension 2", x="MDS Dimension 1") +
+    theme_cup() +
+    theme(axis.title = element_text(size=15))
+```
+
+Create **Figure 6.5** hierarchical cluster model of all lines and alternations.  
+
+```{r}
+#| label: fig-clust-fused
+#| fig-cap: "Dendrogram: clustering the 0-matrix (a single compromise distance matrix merged across all lines and alternations). Hierarchical agglomerative cluster algorithm: WARD."
+#| fig-width: 5
+#| fig-height: 4
+hclust(dfused_total_all, method = "ward.D2") |> 
+  plot()
+```
+
+Create **Figure 6.6** neighornet model of all lines and alternations. Note that plots will vary slightly from run to run. 
+
+```{r}
+#| label: fig-nnet-fused
+#| fig-cap: "Visualizing aggregate similarities: NeighborNet diagram depicting the 0-matrix (a single compromise distance matrix merged across all lines and alternations). Internode distances (branch lengths) are proportional to cophenetic linguistic distances."
+#| fig-width: 5
+#| fig-height: 4
+nnet <- phangorn::neighborNet(dfused_total_all)
+#plot(nnet, "3D") # movable 3D
+par("mar" = rep(1, 4))
+plot(nnet, "2D")
+```
+
+## 6.7 Discussion
+
+In the discussion we present results of a simulation study validating the VADIS method.
+
+```{r}
+#| label: data-simulation
+mod_list <- readRDS(here("model_output", "intercept_speaker_glm_list.rds"))
+line1 <- VADIS::vadis_line1(mod_list, path = F)
+line2 <- VADIS::vadis_line2(mod_list, path = F)
+rf_mod_list <- readRDS(here("model_output", "intercept_speaker_rf_list.rds"))
+line3 <- VADIS::vadis_line3(rf_mod_list, path = F)
+```
+
+**Figure 6.7** shows an MDS of distances simulating "speakers" from 5 different "varieties", based on the compromise distances from 3 lines of evidence.
+
+```{r}
+#| label: fig-mds-sim
+#| fig-cap: 'Multidimensional scaling representation of the fused distances from all three VADIS lines for seventy-five simulated datasets representing five hypothetical dialect varieties. Points represent hypothetical “speakers” of five “dialects”. Distances between points in the plot are proportional to probabilistic grammar distances between datasets. Note that when simulating the data, varieties C and D were intentionally designed to be much more similar to one another than to the other three varieties.'
+#| fig-width: 5
+#| fig-height: 4
+#| code-fold: true
+fused_dist <- analogue::fuse(line1$distance.matrix, 
+                             line2$distance.matrix, 
+                             line3$distance.matrix)
+fused_mds <- cmdscale(fused_dist, k = 3) %>% 
+  as.data.frame() 
+names(fused_mds) <- c("x", "y", "z")
+fused_mds <- fused_mds %>%
+  rownames_to_column("Name") |> 
+  mutate(
+    # Name = rownames(rank_mds),
+    Variety = str_replace(Name, '\\w$', '') %>% factor(),
+    Speaker = str_extract(Name, '\\w$') %>% factor(),
+    )
+levels(fused_mds$Variety) <- LETTERS[1:5]
+
+fused_mds %>% 
+  ggplot(aes(x, y, group = Variety)) +
+  geom_point(aes(shape = Variety)) +
+  stat_ellipse(level = .9, linetype = "dashed", type = "norm", color = "grey") +
+  stat_ellipse(level = .5, linewidth = 1, type = "norm", color = "grey") +
+  labs(x = "MDS dimension 1", y = "MDS dimension 2") +
+  theme_cup() +
+  theme(legend.position = c(1,0), legend.justification = c(1,0),  
+        legend.background = element_rect(color = "black"))
+```
+
+**Figure 6.8** shows a cluster analysis dendrogram based on distances from the the second line of evidence.
+
+```{r}
+#| label: fig-clust-sim
+#| fig-cap: 'Hierarchical clustering of simulated datasets based on VADIS Line 2. Leaf nodes represent individual “speakers” (lowercase letters) across five distinct “dialects” (uppercase letters), for example, “Bk” represents speaker “k” in dialect “B”, and so on. Note that dialects are clearly separated from one another as we designed them to be.'
+#| fig-width: 5
+#| fig-height: 7
+dd.row <- hclust(line2$distance.matrix, "average") %>% 
+  as.dendrogram()
+ddata_x <- ggdendro::dendro_data(dd.row)
+
+labs <- label(ddata_x) %>% 
+  mutate(
+    Variety = LETTERS[as.integer(str_extract(label, "\\d"))],
+    label = str_replace(label, "var\\d", Variety)
+  )
+
+ggplot(segment(ddata_x)) +
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(
+    data = labs,
+    aes(label = label, x = x, y = y),
+    hjust = 1) +
+  # scale_color_manual(values = cols) +
+  coord_flip() +
+  theme_dendro()
+```
+
+
+
+# Chapter 7
+
+In this chapter we present the analysis of the ratings experiment.
+
+Load the experimental ratings data.
+
+```{r}
+#| label: data-ratings
+ratings_df <- here("data", "data_exp_ratings.txt") |> 
+  read.delim() |> 
+  mutate(Variety = factor(Variety, levels = c("BrE", "NZE", "SgE", "IndE")))
+```
+
+## 7.1 Methods
+
+Create **Figure 7.1** showing the distribution of corpus model probabilities for each experimental item.
+
+```{r}
+#| label: fig-7.1
+#| fig-cap: "Experimental items vs. corpus model predicted probabilities."
+#| fig-width: 5
+#| fig-height: 4
+ratings_df |> 
+  select(item, pred) |>
+  mutate(pred = round(pred, 6)) |>
+  distinct() |>
+  mutate(prob = gtools::inv.logit(pred)) |>
+  ggplot(aes(reorder(item, prob), prob)) +
+  geom_point() +
+  ylim(0,1) +
+  labs(x = "Item", y = "Corpus model probability") +
+  theme_cup() +
+  theme(axis.text.x = element_text(size = 8))
+```
+
+Instruction page in **Figure 7.2** (click to embiggen).
+
+```{r}
+#| label: fig-7.2
+#| fig-cap: "Welcome page and instructions for the ratings experiments."
+#| fig-width: 5
+#| fig-height: 6
+knitr::include_graphics("07_exp_instructions_page.png")
+```
+
+
+
+
+## 7.2 Results
+
+Correlations between corpus model predictions and ratings for split variant by variety.
+
+```{r}
+#| label: fig-7.3
+#| fig-cap: "Experimental ratings vs. corpus model predicted log odds, with LOESS smooths (BrE *r* = .54; NZE *r* = .48; IndE *r* = .47; SgE *r* = .42). Ratings > 50 indicate greater preference for the split variant (pick the book up), ratings < 50 indicate greater preference for the continuous variant (pick up the book). Dots show ratings for each individual trial."
+#| fig-width: 5
+#| fig-height: 5
+#| code-fold: true
+nested_df <- ratings_df |>
+  arrange(Variety) |>
+  group_by(Variety) |>
+  nest()
+
+ylab <- data.frame(
+  label = "Preference rating for split variant",
+  x = 1,
+  y = 1
+  ) |>
+  ggplot() +
+  geom_text(aes(x, y, label = label), angle = 90, family = "serif") +
+  theme_void() +
+  coord_cartesian(clip = "off")
+
+p <- map(
+  seq_along(nested_df$data),
+  .f = function(i){
+    d <- nested_df$data[[i]]
+    p <- d |>
+      ggplot(aes(pred, rating_raw)) +
+      geom_smooth(method = "loess",  formula = y ~ x, se = F, color = "black",
+                  linetype = 2) +
+      geom_point(alpha = .2, size = .5, color = "grey50") +
+      labs(x = "",
+           y = "") +
+      ggtitle(pull(nested_df, Variety)[i]) +
+      ylim(0, 100) +
+      theme_cup()
+
+    if((i %% 2) == 0){
+      p <- p + theme(
+        # axis.title.y = element_blank(),
+        axis.text.y = element_blank()
+      )
+    }
+    p
+  }) |>
+  wrap_plots()
+
+p <- ylab + p + plot_layout(widths = c(.8, 25)) +
+  plot_annotation(
+    caption = "Corpus model predictions for split variant (logit scale)",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 12,
+                                              margin = margin(t = 0),
+                                            family = "serif")))
+p
+```
+
+Mean ratings for split variant by variety.
+
+```{r}
+#| label: fig-7.4
+#| fig-cap: "Experimental ratings across varieties, with median rating. Ratings > 50 indicate greater preference for the split variant (pick the book up), ratings < 50 indicate greater preference for the continuous variant (pick up the book)."
+#| fig-width: 5
+#| fig-height: 4
+meds <- c(by(ratings_df$rating_raw, ratings_df$Variety, median)) + 8
+
+ratings_df |> 
+  ggplot(aes(Variety, rating_raw)) +
+  geom_hline(yintercept = 0, linewidth = 1, color = "grey") +
+  geom_point(size = 1, alpha = .4, position = position_jitter(width = .2),
+             color = "darkgray", pch = 16) +
+  ggplot2::stat_summary(fun = "median", size = 1.5, color = "black", pch = 18) +
+  geom_label(data = data.frame(),
+             aes(x = names(meds) , y = meds, label = meds),
+             fontface = "bold", size = 5, family = "serif") +
+  labs(x = "", y = "Predicted rating for split variant") +
+  ggtitle("Variety") +
+  theme_cup()
+```
+
+Correlations between corpus model predictions and ratings for split variant by variety, averaged by stimulus item.
+
+
+```{r}
+#| label: fig-7.5
+#| fig-cap: "Experimental ratings vs. corpus model predictions, averaged by item and variety. Ratings > 50 indicate greater preference for the split variant (*pick the book up*), ratings < 50 indicate greater preference for the continuous variant (pick up the book). Dots show ratings for each individual trial."
+#| fig-width: 6
+#| fig-height: 6
+#| code-fold: true
+nested_df <- ratings_df |>
+    arrange(Variety) |>
+    group_by(Variety) |>
+    nest() |>
+    mutate(
+      data = map(data,
+                 ~ .x |> 
+                   group_by(item) |>
+                   summarise(
+                     rating = mean(rating_raw),
+                     pred = median(pred)
+                   ))
+      )
+
+ylab <- data.frame(
+  label = "Mean preference rating for split variant",
+  x = 1,
+  y = 1
+  ) |>
+  ggplot() +
+  geom_text(aes(x, y, label = label), angle = 90, family = "serif") +
+  theme_void() +
+  coord_cartesian(clip = "off")
+
+p <- map(
+  seq_along(nested_df$data),
+  .f = function(i){
+    d <- nested_df$data[[i]]
+    p <- d |>
+      ggplot(aes(pred, rating)) +
+      geom_smooth(method = "lm",  formula = y ~ x, se = F, color = "gray") +
+      geom_point() +
+      ggrepel::geom_text_repel(aes(label = item), size = 4, 
+                               segment.color = "grey", family = "serif",
+                               max.overlaps = 15) +
+      labs(x = "",
+           y = "") +
+      ggtitle(pull(nested_df, Variety)[i]) +
+      ylim(0, 100) +
+      theme_cup()
+
+    if((i %% 2) == 0) p <- p + theme(axis.text.y = element_blank()) 
+    return(p)
+  }) |>
+  wrap_plots()
+
+p <- ylab + p + plot_layout(widths = c(1, 25)) +
+  plot_annotation(
+    caption = "Corpus model predictions for split variant (logit scale)",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 12,
+                                              margin = margin(t = 0),
+                                              family = "serif"))
+  )
+p
+```
+
+
+Create Table 7.1 showing mean ratings (with standard deviation) per item and variety. 
+
+```{r}
+#| label: tbl-7.1
+#| tbl-cap: "Average ratings (with standard deviations) by item across participants. Ratings above 50 reflect preference for the split variant; ratings below 50 reflect preference for the continuous variant."
+#| code-fold: true
+item_means <- ratings_df |>
+    group_by(item, Variety) |>
+    summarise(
+      mean = round(mean(rating_raw), 1),
+      SD = round(sd(rating_raw, na.rm = T), 1)
+    ) |>
+    ungroup()
+
+item_mean_tab <- item_means |>
+  dplyr::filter(Variety == "BrE") |>
+  rename(Br.Mean = "mean", Br.SD = "SD") |>
+  select(-Variety) |>
+  bind_cols(
+    item_means |>
+      dplyr::filter(Variety == "NZE") |>
+      rename(NZ.Mean = "mean", NZ.SD = "SD") |>
+      select(3:4),
+    item_means |>
+      dplyr::filter(Variety == "SgE") |>
+      rename(Sg.Mean = "mean", Sg.SD = "SD") |>
+      select(3:4),
+    item_means |>
+      dplyr::filter(Variety == "IndE") |>
+      rename(Ind.Mean = "mean", Ind.SD = "SD") |>
+      select(3:4)
+  ) |>
+  rename(Item = "item") |>
+  arrange(desc(Br.Mean))
+
+knitr::kable(item_mean_tab)
+```
+
+
+### Statistical Analysis
+
+All continuous predictors were centered and scaled by 2 standard deviations following @gelman_scaling_2008. We also center the ratings around the midpoint 50.
+
+```{r}
+#| label: standardize-preds
+#| code-fold: show
+ratings_df <- ratings_df |> 
+  mutate(
+    z.DirObjLettLength = z.(DirObjLettLength, factor = 2),
+    z.pred_min = z.(pred_new_noLen, factor = 2),
+    rating_c = rating_raw - 50,
+    gender = as.factor(gender),
+    education_simple = factor(education_simple, levels = c("university", "no_university", "postgraduate"))
+  )
+```
+
+We use a custom coding for `Variety`, which included the following levels:
+
+- Level 1: Inner (BrE and NZE) vs. Outer (IndE and SgE) Circle
+- Level 2: BrE vs. NZE (Inner only)
+- Level 3: IndE vs. SgE (Outer only)
+
+Use the `{hypr}` package for finding the right codings.
+
+```{r}
+#| label: custom-code
+#| code-fold: show
+custom_variety_hyp <- hypr::hypr(
+  InnerCvsOuterC = BrE + NZE ~ IndE + SgE,
+  BrEvsNZE = BrE ~ NZE,
+  IndEvsSgE = IndE ~ SgE,
+  levels = levels(ratings_df$Variety)
+)
+
+custom_variety_hyp
+```
+
+
+
+```{r}
+#| label: add-custom-code
+#| code-fold: show
+ratings_df$Variety_custom <- ratings_df$Variety
+contrasts(ratings_df$Variety_custom) <- hypr::contr.hypothesis(custom_variety_hyp)
+contrasts(ratings_df$Variety_custom)
+```
+
+We fit a linear mixed model (estimated using REML and nloptwrap optimizer) to predict centered rating [`rating_c` with variety [`Variety_custom`], direct object length [`z.DirObjLettLength`], corpus model prediction [`z.pred_min`], gender, and education [`education_simpl`]. The model included second-order interaction terms for variety x direct object length and variety x corpus prediction (formula: `rating_c ~ Variety_custom * (z.DirObjLettLength + z.pred_min) + gender + education_simple`). The model included random intercepts for participant [`id`] and stimulus `item`, along with by-`id` slopes for the effect of corpus model prediction (`z.pred_min`) and direct object length (`z.DirObjLettLength`) (formula: `list(~1 | id, ~1 | item, ~0 + z.pred_min | id, ~0 + z.DirObjLettLength | id)`). 
+
+The final model formula:
+
+```{r}
+#| label: fmla0
+ratings_fmla0 <- rating_c ~ (1|id) + 
+      (1|item) +
+      (0 + z.pred_min|id) +
+      (0 + z.DirObjLettLength|id) +
+      Variety_custom + 
+      z.DirObjLettLength + 
+      z.pred_min + 
+      Variety_custom:z.DirObjLettLength +
+      Variety_custom:z.pred_min +
+      gender +
+      education_simple
+```
+
+We fit a model with the demographic predictors, then one without.
+
+```{r}
+#| label: ratings-mod0
+rating_mod0 <- lmer(ratings_fmla0, data = ratings_df)
+```
+
+```{r}
+#| label: ratings-mod1
+# remove demo factors
+ratings_fmla1 <- update(ratings_fmla0, . ~ . -gender - education_simple)
+rating_mod1 <- lmer(ratings_fmla1, data = ratings_df)
+```
+
+
+Compare the models. No evidence for effect of gender or education, but we report the one with demographic factors.
+
+```{r}
+#| label: anova
+anova(rating_mod0, rating_mod1)
+```
+
+```{r}
+model_performance(rating_mod0)
+```
+
+Create **Table 7.2**
+
+```{r}
+#| label: tbl-7.2
+#| tbl-cap: "Summary statistics, fixed effects coefficients, and random effects standard deviations for linear mixed-model fitting participant rating as function of DIRECT OBJECT LENGTH, CORPUS MODEL PREDICTION, and participant VARIETY, GENDER, and EDUCATION LEVEL."
+#| tbl-subcap: 
+#|  - "Model summary"
+#|  - "Fixed effects"
+#|  - "Random effects"
+#| layout-ncol: 1
+#| code-fold: true
+y <- lme4::getME(rating_mod0, "y")
+smry <- summary(rating_mod0)
+logLik <- round(smry$logLik, 2)
+aic <- round(AIC(rating_mod0), 2)
+r_sq_m <- round(MuMIn::r.squaredGLMM(rating_mod0)[1], 3)
+r_sq_c <- round(MuMIn::r.squaredGLMM(rating_mod0)[2], 3)
+n = nrow(getME(rating_mod0, "X"))
+
+fixed_eff_tab <- smry$coefficients |>
+  as.data.frame() |>
+  dplyr::select(-3)
+rownames(fixed_eff_tab) <- gsub("Variety_custom", "", rownames(fixed_eff_tab))
+
+
+names(fixed_eff_tab)[4] <- "p-value"
+
+random_eff_tab <- smry$varcor |>
+  as.data.frame() |>
+  mutate(grp = str_remove(grp, "\\..*")) |>
+  rename("Stand.Dev." = "sdcor") |>
+  mutate(
+    name = c(
+      "id: by-DirObjWordLength",
+      "id: by-CorpusPred",
+      "id: (Intercept)",
+      "item: (Intercept)",
+      "Residual"
+    )) |>
+  select(6,5) |>
+  mutate(`Stand.Dev.` = round(Stand.Dev., 2))
+
+data.frame(
+  `Marginal R2` = r_sq_m,
+  `Conditional R2` = r_sq_c,
+  N = n,
+  LogLikelihood = logLik,
+  AIC = aic
+) |> 
+  knitr::kable()
+
+fixed_eff_tab |>
+  knitr::kable(
+    # format = "html",
+    digits = 3,
+    label = "fixef"
+  )
+
+random_eff_tab |> 
+  knitr::kable(
+    format = "html",
+    digits = 2,
+    label = "ranef"
+  )
+```
+
+Plot the partial effects for the Variety on ratings.
+
+```{r}
+#| label: fig-interaction-pred-7.6
+#| fig-cap: "Partial effects plots of interaction of VARIETY on participant ratings (with CORPUS PREDICTION = 0, DIRECT OBJECT LENGTH = 0.4, GENDER = “female”, and EDUCATION = “university”). Positive ratings indicate greater preference for the split variant (pick the book up), negative ratings indicate greater preference for the continuous variant (pick up the book)."
+#| fig-width: 5
+#| fig-height: 4
+#| code-fold: true
+effects::Effect(c("Variety_custom"), rating_mod0) |>
+    as.data.frame() |>
+    mutate(Variety_custom = factor(Variety_custom,
+                                   levels = c("BrE", "NZE", "SgE", "IndE"))) |>
+    ggplot(aes(Variety_custom, fit)) +
+    geom_hline(yintercept = 0, size = 1, color = "grey") +
+    geom_point(size = 4) +
+    geom_errorbar(aes(ymin = lower, ymax = upper), width = .1) +
+    # ylim(-10, 10) +
+    labs(x = "", y = "Predicted rating (centered at 50)") +
+    ggtitle("Variety") +
+    theme_cup() +
+    theme(
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 20),
+      axis.text.y = element_text(size = 20),
+      plot.title = element_text(size = 28)
+    )
+```
+
+
+Plot the partial effects for the Variety X Corpus prediction (`Variety_custom:z.pred_min`) interaction.
+
+```{r}
+#| label: fig-interaction-pred-7.7
+#| fig-cap: "Partial effects plots of interaction of Variety and corpus model predictions on participant ratings (with DirObjLettLength = 15.5, Gender = 'female', and Education = 'university'). Top plot shown to allow for easier comparison across varieties. Positive ratings indicate greater preference for the split variant (*pick the book up*), negative ratings indicate greater preference for the continuous variant (*pick up the book*)."
+#| fig-width: 5
+#| fig-height: 7
+#| code-fold: true
+cols <- RColorBrewer::brewer.pal(4, "Set1")
+
+eff_df <- effects::Effect(
+  focal.predictors = c("z.pred_min", "Variety_custom"),
+  mod = rating_mod1,
+  xlevels = 10
+  ) |> 
+  as.data.frame()
+
+nested_df <- eff_df |>
+  arrange(Variety_custom) |>
+  group_by(Variety_custom) |>
+  nest() |>
+  ungroup()
+
+text_df <- eff_df |>
+  group_by(Variety_custom) |>
+  summarise(
+    x = max(z.pred_min) + .05,
+    y = max(fit)
+  ) |>
+  distinct() |>
+  ungroup()
+
+# single plot with overlapping lines
+p1 <- eff_df |>
+  ggplot(aes(z.pred_min, fit, color = Variety_custom)) +
+  geom_line(aes(linetype = Variety_custom), size = 1) +
+  labs(x = "", y = "") +
+  geom_text(data = text_df,
+            aes(x, y, label = Variety_custom, color = Variety_custom),
+            family = "serif", size = 5, hjust = c(0,0,1,0)) +
+  theme_cup() +
+  scale_color_grey(guide = "none") +
+  scale_linetype_discrete(guide = "none") +
+  # xlim(-2.1, 3.8) +
+  theme(legend.position = "top", legend.text = element_text(size = rel(1.2)))
+
+# faceted plots with confidence intervals
+p2 <- map(
+  seq_along(nested_df$data),
+  .f = function(i){
+    d <- nested_df$data[[i]]
+    p <- d |>
+      ggplot(aes(z.pred_min, fit)) +
+      geom_ribbon(aes(ymin = lower, ymax = upper),
+                  alpha = .3, color = "grey") +
+      geom_line(size = 1) +
+      labs(x = "",
+           y = "") +
+      ggtitle(pull(nested_df, Variety_custom)[i]) +
+      ylim(-28, 30) +
+      theme_cup()
+    return(p)
+  }) |>
+  wrap_plots(ncol = 2)
+
+# plot for label
+ylab <- data.frame(
+  label = "Predicted rating (centered at 50)",
+  x = 1,
+  y = 1
+) |>
+  ggplot() +
+  geom_text(aes(x, y, label = label), angle = 90, family = "serif") +
+  theme_void() +
+  coord_cartesian(clip = "off")
+
+p <- ylab + (p1/p2 + plot_layout(heights = c(20, 30))) +
+  plot_layout(widths = c(.8, 25)) +
+  plot_annotation(
+    caption = "Corpus model predicted log odds",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 12,
+                                              margin = margin(t = 0),
+                                              family = "serif"))
+  )
+p
+```
+
+
+Plot the partial effects for the Variety X Direct Object Length (`Variety_custom:z.DirObjLettLength`) interaction.
+
+```{r}
+#| label: fig-interaction-length-7.8
+#| fig-cap: "Partial effects plots of interaction of Variety and Direct Object Length on participant ratings (with Corpus Prediction = −.19, Gender = ‘female’, and Education = ‘university’). Top plot shown to allow for easier comparison across varieties. Positive ratings indicate greater preference for the split variant (*pick the book up*), negative ratings indicate greater preference for the continuous variant (*pick up the book*)."
+#| fig-width: 5
+#| fig-height: 7
+#| code-fold: true
+cols <- RColorBrewer::brewer.pal(4, "Set1")
+
+length_levs <- ratings_df |>
+  pull(z.DirObjLettLength) |>
+  round(3) |>
+  unique() |>
+  sort()
+
+eff_df <- effects::Effect(
+  focal.predictors = c("z.DirObjLettLength", "Variety_custom"),
+  mod = rating_mod1,
+  xlevels = list(z.DirObjLettLength = length_levs)) |>
+  as.data.frame() |>
+  mutate(Variety_custom = factor(Variety_custom,
+                                 levels = c("BrE", "NZE", "SgE", "IndE")))
+
+nested_df <- eff_df |>
+  arrange(Variety_custom) |>
+  group_by(Variety_custom) |>
+  nest() |>
+  ungroup()
+
+text_df <- eff_df |>
+  group_by(Variety_custom) |>
+  summarise(
+    x = ifelse(Variety_custom == "SgE",
+               min(z.DirObjLettLength) -.05, max(z.DirObjLettLength) + .05),
+    y = ifelse(Variety_custom == "SgE", max(fit), min(fit))
+  ) |>
+  distinct() |>
+  ungroup()
+
+# single plot with overlapping lines
+p1 <- eff_df |>
+  ggplot(aes(z.DirObjLettLength, fit, color = Variety_custom)) +
+  geom_line(aes(linetype = Variety_custom), size = 1) +
+  labs(x = "", y = "") +
+  geom_text(data = text_df,
+            aes(x, y, label = Variety_custom, color = Variety_custom),
+            family = "serif", size = 5, hjust = c(0,0,1,0)) +
+  theme_cup() +
+  scale_color_grey(guide = "none") +
+  scale_linetype_discrete(guide = "none") +
+  # xlim(-2.1, 3.8) +
+  theme(legend.position = "top", legend.text = element_text(size = rel(1.2)))
+
+# faceted plots with confidence intervals
+p2 <- map(
+  seq_along(nested_df$data),
+  .f = function(i){
+    d <- nested_df$data[[i]]
+    p <- d |>
+      ggplot(aes(z.DirObjLettLength, fit)) +
+      geom_ribbon(aes(ymin = lower, ymax = upper),
+                  alpha = .3, color = "grey") +
+      geom_line(size = 1) +
+      labs(x = "",
+           y = "") +
+      ggtitle(pull(nested_df, Variety_custom)[i]) +
+      ylim(-28, 30) +
+      theme_cup()
+    return(p)
+  }) |>
+  wrap_plots(ncol = 2)
+
+# plot for label
+ylab <- data.frame(
+  label = "Predicted rating (centered at 50)",
+  x = 1,
+  y = 1
+) |>
+  ggplot() +
+  geom_text(aes(x, y, label = label), angle = 90, family = "serif") +
+  theme_void() +
+  coord_cartesian(clip = "off")
+
+p <- ylab + (p1/p2 + plot_layout(heights = c(20, 30))) +
+  plot_layout(widths = c(.8, 25)) +
+  plot_annotation(
+    caption = "Number of words in direct object\n(z-score standardized)",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 12,
+                                              margin = margin(t = 0),
+                                              family = "serif"))
+  )
+p
+```
+
+
+
+## 7.3 Discussion
+
+Create the tables showing the amount of agreement between participants and corpus model.
+
+```{r}
+#| label: tbl-7.3
+#| tbl-cap: "Agreement scores reflecting the percentage of experimental items in which participants’ preferred variant matched the variant predicted by corpus model (100 percent indicates complete agreement between participants and corpus model)."
+ratings_df <- ratings_df |> 
+  mutate(
+    Observed = str_replace_all(Response, "Discontinuous", "Split"), 
+    corpus_pred = ifelse(pred_new > 0, "Split", "Continuous"),
+    participant_pref = ifelse(rating_c > 0, "Split", "Continuous"),
+    agree = ifelse(corpus_pred == participant_pref, 1, 0),
+    Corpus_model_correct = ifelse(corpus_pred == Observed, "Yes", "No")
+  )
+
+ratings_df |> 
+  group_by(Variety) |> 
+  summarise(
+    Percent_agree = round(100*mean(agree), 1)
+  )
+```
+
+
+```{r}
+#| label: tbl-7.4
+#| tbl-cap: "Agreement scores reflecting the percentage to which participants’ preferred variant matched the variant predicted by corpus model (100 percent indicates complete agreement between participants and corpus model). Observed variant and corpus model correctness included for comparison."
+ratings_df |>
+  group_by(item) |>
+  summarise(
+    Mean_rating = round(mean(rating_raw), 1),
+    SD_rating = round(sd(rating_raw, na.rm = T), 1),
+    Percent_agree = mean(agree)
+  ) |>
+  ungroup() |> 
+  arrange(desc(Percent_agree)) |> 
+  inner_join(ratings_df |> select(item, pred, Observed, Corpus_model_correct), by = "item") |> 
+  distinct(item, .keep_all = T) |> 
+  select(item, Mean_rating, pred, Percent_agree, Observed, Corpus_model_correct) |> 
+  rename("Corpus_model_prob" = "pred", Item = "item") 
+```
+
+
+Show **Figure 7.9** of the random forest partial dependencies adapted from @szmrecsanyi_around_2016.
+
+```{r}
+#| label: fig-7.9
+#| fig-cap: "Predicted probabilities by DIROBJLENGTH (in words), register and VARIETY obtained from random forest model predicting the split variant (adapted from Szmrecsanyi et al., 2016a, figure 3)."
+#| fig-width: 5
+#| fig-height: 4
+#| code-fold: true
+knitr::include_graphics("07_sz_et_al-particle_verb_rf.png")
+```
+
+
+
+
+
+# Appendix {#sec-appendix}
+
+## 6.4 Quantification of Similarity Coefficients for data subets {#sec-append-6.4}
+
+### Spoken data only
+
+Just the spoken data.
+
+```{r}
+#| label: data-spk-split
+data_gens_spoken <- data_genitives |> 
+  filter(MODE == "spoken") |> 
+  mutate(
+    PorHeadLemma_pruned = filter_infrequent(POR_HEAD_LEMMA, 20),
+    PumHeadLemma_pruned = filter_infrequent(PUM_HEAD_LEMMA, 20)
+    ) |> 
+  droplevels() 
+data_gens_spoken_split <- split(data_gens_spoken, data_gens_spoken$variety_of_E)
+
+data_dats_spoken <- data_datives |> 
+  filter(Mode == "spoken") |> 
+  mutate(
+    Verb_pruned = filter_infrequent(Verb, 20),
+    RecHeadPlain_pruned = filter_infrequent(RecHeadPlain, 20),
+    ThemeHeadPlain_pruned = filter_infrequent(ThemeHeadPlain, 20)
+  ) |> 
+  droplevels() 
+data_dats_spoken_split <- split(data_dats_spoken, data_dats_spoken$variety_of_E)
+
+data_pv_spoken <- data_particle_verbs |> 
+  filter(grepl("^spok", Register)) |> 
+  mutate(
+    VerbPart_pruned = filter_infrequent(VerbPart, 20),
+    Verb_pruned = filter_infrequent(Verb, 20)
+  ) |> 
+  droplevels() 
+data_pv_spoken_split <- split(data_pv_spoken, data_pv_spoken$variety_of_E)
+# remove unnecessary
+rm(data_gens_spoken, data_dats_spoken, data_pv_spoken); invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+Start with the **GENITIVE alternation**. First run the by-variety regression models.
+
+```{r}
+#| label: gens-vadis-glmer_spk
+if(!file.exists(here("model_output", "gen_glmer_list_spk.rds"))){
+  genitives_variety_glmer_spk <- vector("list")
+  for (i in seq_along(data_gens_spoken_split)){
+    d <- data_gens_spoken_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = gen_f4) # use the fitting function for convenience
+    # fit the model
+    genitives_variety_glmer_spk[[i]] <- glmer(
+      gen_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(genitives_variety_glmer_spk) <- names(data_gens_spoken_split)
+  saveRDS(genitives_variety_glmer_spk, here("model_output", "genitives_variety_glmer_spk.rds"))
+} else {
+  genitives_variety_glmer_spk <- readRDS(here("model_output", "genitives_variety_glmer_spk.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(genitives_variety_glmer_spk), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf-vadis-spk
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_vadis_list_spk.rds"))){
+  genitives_variety_forests_vadis_spk <- readRDS(
+    here("model_output", "gen_crf_vadis_list_spk.rds")
+  )
+} else {
+  genitives_variety_forests_vadis_spk <- lapply(
+    data_gens_spoken_split, function(x) fit_party_crf(gen_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(genitives_variety_forests_vadis_spk, here("model_output", "genitives_variety_forests_vadis_spk.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+gen_signif_line <- vadis_line1(genitives_variety_glmer_spk, path = here("model_output", "gens_line1_spk.rds"),
+                               overwrite = "reload")
+gen_coef_line <- vadis_line2(genitives_variety_glmer_spk, path = here("model_output", "gens_line2_spk.rds"),
+                               overwrite = "reload")
+gen_varimp_line <- vadis_line3(genitives_variety_forests_vadis_spk, 
+                                 path = here("model_output", "gens_line3_spk.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+gen_mean_sims <- data.frame(
+  line1 = gen_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = gen_coef_line$similarity.scores[,1],
+  line3 = gen_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+gen_mean_sims$Variety_Mean <- rowMeans(gen_mean_sims)
+rownames(gen_mean_sims) <- c(names(data_gens_spoken_split), "Line Mean")
+round(gen_mean_sims, 3)
+```
+
+Next the **DATIVE alternation**.
+
+```{r}
+#| label: dats-vadis-glmer_spk
+if(!file.exists(here("model_output", "dat_glmer_list_spk.rds"))){
+  datives_variety_glmer_spk <- vector("list")
+  for (i in seq_along(data_dats_spoken_split)){
+    d <- data_dats_spoken_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = dat_f4) # use the fitting function for convenience
+    # fit the model
+    datives_variety_glmer_spk[[i]] <- glmer(
+      dat_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(datives_variety_glmer_spk) <- names(data_dats_spoken_split)
+  saveRDS(datives_variety_glmer_spk, here("model_output", "datives_variety_glmer_spk.rds"))
+} else {
+  datives_variety_glmer_spk <- readRDS(here("model_output", "datives_variety_glmer_spk.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(datives_variety_glmer_spk), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: dats-data-split-crf-vadis-spk
+#| eval: false
+if(file.exists(here("model_output", "dat_crf_vadis_list_spk.rds"))){
+  datives_variety_forests_vadis_spk <- readRDS(
+    here("model_output", "dat_crf_vadis_list_spk.rds")
+  )
+} else {
+  datives_variety_forests_vadis_spk <- lapply(
+    data_dats_spoken_split, function(x) fit_party_crf(dat_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(datives_variety_forests_vadis_spk, here("model_output", "datives_variety_forests_vadis_spk.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+dat_signif_line <- vadis_line1(datives_variety_glmer_spk, path = here("model_output", "dats_line1_spk.rds"),
+                               overwrite = "reload")
+dat_coef_line <- vadis_line2(datives_variety_glmer_spk, path = here("model_output", "dats_line2_spk.rds"),
+                               overwrite = "reload")
+dat_varimp_line <- vadis_line3(datives_variety_forests_vadis_spk, 
+                                 path = here("model_output", "dats_line3_spk.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+dat_mean_sims <- data.frame(
+  line1 = dat_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = dat_coef_line$similarity.scores[,1],
+  line3 = dat_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+dat_mean_sims$Variety_Mean <- rowMeans(dat_mean_sims)
+rownames(dat_mean_sims) <- c(names(data_dats_spoken_split), "Line Mean")
+round(dat_mean_sims, 3)
+```
+
+
+Finally, the **PARTICLE PLACEMENT alternation**.
+
+```{r}
+#| label: pv-vadis-glmer-spk
+if(!file.exists(here("model_output", "pv_glmer_list_spk.rds"))){
+  pv_variety_glmer_spk <- vector("list")
+  for (i in seq_along(data_pv_spoken_split)){
+    d <- data_pv_spoken_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = pv_f4) # use the fitting function for convenience
+    # fit the model
+    pv_variety_glmer_spk[[i]] <- glmer(
+      pv_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(pv_variety_glmer_spk) <- names(data_pv_spoken_split)
+  saveRDS(pv_variety_glmer_spk, here("model_output", "pv_variety_glmer_spk.rds"))
+} else {
+  pv_variety_glmer_spk <- readRDS(here("model_output", "pv_variety_glmer_spk.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(pv_variety_glmer_spk), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+if(file.exists(here("model_output", "pv_crf_vadis_list_spk.rds"))){
+  pv_variety_forests_vadis_spk <- readRDS(
+    here("model_output", "pv_crf_vadis_list_spk.rds")
+  )
+} else {
+  pv_variety_forests_vadis_spk <- lapply(
+    data_pv_spoken_split, function(x) fit_party_crf(pv_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(pv_variety_forests_vadis_spk, here("model_output", "pv_variety_forests_vadis_spk.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+pv_signif_line <- vadis_line1(pv_variety_glmer_spk, path = here("model_output", "pv_line1_spk.rds"),
+                               overwrite = "reload")
+pv_coef_line <- vadis_line2(pv_variety_glmer_spk, path = here("model_output", "pv_line2_spk.rds"),
+                               overwrite = "reload")
+pv_varimp_line <- vadis_line3(pv_variety_forests_vadis_spk, 
+                                 path = here("model_output", "pv_line3_spk.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+pv_mean_sims <- data.frame(
+  line1 = pv_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = pv_coef_line$similarity.scores[,1],
+  line3 = pv_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+pv_mean_sims$Variety_Mean <- rowMeans(pv_mean_sims)
+rownames(pv_mean_sims) <- c(names(data_pv_spoken_split), "Line Mean")
+round(pv_mean_sims, 3)
+```
+
+
+Now create cummary table.
+
+```{r}
+#| label: tbl-sim-coeffs-spk
+tab <- data.frame(
+  Genitives = unlist(gen_mean_sims[10, ]),
+  Datives = unlist(dat_mean_sims[10, ]),
+  `Particle placement` = unlist(pv_mean_sims[10, ])
+) |> 
+  round(2)
+rownames(tab) <- c("1st line", "2nd line", "3rd line", "mean")
+tab
+```
+
+Core Grammar Score for **spoken data only**:
+
+```{r}
+round(rowMeans(tab[4,]), 3)
+```
+
+
+```{r}
+# clean up
+rm(genitives_variety_forests_vadis_spk, datives_variety_forests_vadis_spk, pv_variety_forests_vadis_spk)
+invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+
+### Written data only
+
+Just the written data.
+
+```{r}
+#| label: data-wrt-split
+data_gens_written <- data_genitives |> 
+  filter(MODE == "written") |> 
+  mutate(
+    PorHeadLemma_pruned = filter_infrequent(POR_HEAD_LEMMA, 20),
+    PumHeadLemma_pruned = filter_infrequent(PUM_HEAD_LEMMA, 20)
+    ) |> 
+  droplevels() 
+data_gens_written_split <- split(data_gens_written, data_gens_written$variety_of_E)
+
+data_dats_written <- data_datives |> 
+  filter(Mode == "written") |> 
+  mutate(
+    Verb_pruned = filter_infrequent(Verb, 20),
+    RecHeadPlain_pruned = filter_infrequent(RecHeadPlain, 20),
+    ThemeHeadPlain_pruned = filter_infrequent(ThemeHeadPlain, 20)
+  ) |> 
+  droplevels() 
+data_dats_written_split <- split(data_dats_written, data_dats_written$variety_of_E)
+
+data_pv_written <- data_particle_verbs |> 
+  filter(grepl("^spok", Register)) |> 
+  mutate(
+    VerbPart_pruned = filter_infrequent(VerbPart, 20),
+    Verb_pruned = filter_infrequent(Verb, 20)
+  ) |> 
+  droplevels() 
+data_pv_written_split <- split(data_pv_written, data_pv_written$variety_of_E)
+# remove unnecessary
+rm(data_gens_written, data_dats_written, data_pv_written); invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+Start with the **GENITIVE alternation**. First run the by-variety regression models.
+
+```{r}
+#| label: gens-vadis-glmer-wrt
+if(!file.exists(here("model_output", "gen_glmer_list_wrt.rds"))){
+  genitives_variety_glmer_wrt <- vector("list")
+  for (i in seq_along(data_gens_written_split)){
+    d <- data_gens_written_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = gen_f4) # use the fitting function for convenience
+    # fit the model
+    genitives_variety_glmer_wrt[[i]] <- glmer(
+      gen_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(genitives_variety_glmer_wrt) <- names(data_gens_written_split)
+  saveRDS(genitives_variety_glmer_wrt, here("model_output", "genitives_variety_glmer_wrt.rds"))
+} else {
+  genitives_variety_glmer_wrt <- readRDS(here("model_output", "genitives_variety_glmer_wrt.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(genitives_variety_glmer_wrt), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf-vadis-wrt
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_vadis_list_wrt.rds"))){
+  genitives_variety_forests_vadis_wrt <- readRDS(
+    here("model_output", "gen_crf_vadis_list_wrt.rds")
+  )
+} else {
+  genitives_variety_forests_vadis_wrt <- lapply(
+    data_gens_written_split, function(x) fit_party_crf(gen_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(genitives_variety_forests_vadis_wrt, here("model_output", "genitives_variety_forests_vadis_wrt.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+gen_signif_line <- vadis_line1(genitives_variety_glmer_wrt, path = here("model_output", "gens_line1_wrt.rds"),
+                               overwrite = "reload")
+gen_coef_line <- vadis_line2(genitives_variety_glmer_wrt, path = here("model_output", "gens_line2_wrt.rds"),
+                               overwrite = "reload")
+gen_varimp_line <- vadis_line3(genitives_variety_forests_vadis_wrt, 
+                                 path = here("model_output", "gens_line3_wrt.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+gen_mean_sims <- data.frame(
+  line1 = gen_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = gen_coef_line$similarity.scores[,1],
+  line3 = gen_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+gen_mean_sims$Variety_Mean <- rowMeans(gen_mean_sims)
+rownames(gen_mean_sims) <- c(names(data_gens_written_split), "Line Mean")
+round(gen_mean_sims, 3)
+```
+
+Next the **DATIVE alternation**.
+
+```{r}
+#| label: dats-vadis-glmer-wrt
+if(!file.exists(here("model_output", "dat_glmer_list_wrt.rds"))){
+  datives_variety_glmer_wrt <- vector("list")
+  for (i in seq_along(data_dats_written_split)){
+    d <- data_dats_written_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = dat_f4) # use the fitting function for convenience
+    # fit the model
+    datives_variety_glmer_wrt[[i]] <- glmer(
+      dat_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(datives_variety_glmer_wrt) <- names(data_dats_written_split)
+  saveRDS(datives_variety_glmer_wrt, here("model_output", "datives_variety_glmer_wrt.rds"))
+} else {
+  datives_variety_glmer_wrt <- readRDS(here("model_output", "datives_variety_glmer_wrt.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(datives_variety_glmer_wrt), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: dats-data-split-crf-vadis-wrt
+#| eval: false
+if(file.exists(here("model_output", "dat_crf_vadis_list_wrt.rds"))){
+  datives_variety_forests_vadis_wrt <- readRDS(
+    here("model_output", "dat_crf_vadis_list_wrt.rds")
+  )
+} else {
+  datives_variety_forests_vadis_wrt <- lapply(
+    data_dats_written_split, function(x) fit_party_crf(dat_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(datives_variety_forests_vadis_wrt, here("model_output", "datives_variety_forests_vadis_wrt.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+dat_signif_line <- vadis_line1(datives_variety_glmer_wrt, path = here("model_output", "dats_line1_wrt.rds"),
+                               overwrite = "reload")
+dat_coef_line <- vadis_line2(datives_variety_glmer_wrt, path = here("model_output", "dats_line2_wrt.rds"),
+                               overwrite = "reload")
+dat_varimp_line <- vadis_line3(datives_variety_forests_vadis_wrt, 
+                                 path = here("model_output", "dats_line3_wrt.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+dat_mean_sims <- data.frame(
+  line1 = dat_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = dat_coef_line$similarity.scores[,1],
+  line3 = dat_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+dat_mean_sims$Variety_Mean <- rowMeans(dat_mean_sims)
+rownames(dat_mean_sims) <- c(names(data_dats_written_split), "Line Mean")
+round(dat_mean_sims, 3)
+```
+
+
+Finally, the **PARTICLE PLACEMENT alternation**.
+
+```{r}
+#| label: pv-vadis-glmer-wrt
+if(!file.exists(here("model_output", "pv_glmer_list_wrt.rds"))){
+  pv_variety_glmer_wrt <- vector("list")
+  for (i in seq_along(data_pv_written_split)){
+    d <- data_pv_written_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = pv_f4) # use the fitting function for convenience
+    # fit the model
+    pv_variety_glmer_wrt[[i]] <- glmer(
+      pv_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(pv_variety_glmer_wrt) <- names(data_pv_written_split)
+  saveRDS(pv_variety_glmer_wrt, here("model_output", "pv_variety_glmer_wrt.rds"))
+} else {
+  pv_variety_glmer_wrt <- readRDS(here("model_output", "pv_variety_glmer_wrt.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(pv_variety_glmer_wrt), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: pv-data-split-crf-vadis-wrt
+#| eval: false
+if(file.exists(here("model_output", "pv_crf_vadis_list_wrt.rds"))){
+  pv_variety_forests_vadis_wrt <- readRDS(
+    here("model_output", "pv_crf_vadis_list_wrt.rds")
+  )
+} else {
+  pv_variety_forests_vadis_wrt <- lapply(
+    data_pv_written_split, function(x) fit_party_crf(pv_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(pv_variety_forests_vadis_wrt, here("model_output", "pv_variety_forests_vadis_wrt.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+pv_signif_line <- vadis_line1(pv_variety_glmer_wrt, path = here("model_output", "pv_line1_wrt.rds"),
+                               overwrite = "reload")
+pv_coef_line <- vadis_line2(pv_variety_glmer_wrt, path = here("model_output", "pv_line2_wrt.rds"),
+                               overwrite = "reload")
+pv_varimp_line <- vadis_line3(pv_variety_forests_vadis_wrt, 
+                                 path = here("model_output", "pv_line3_wrt.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+pv_mean_sims <- data.frame(
+  line1 = pv_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = pv_coef_line$similarity.scores[,1],
+  line3 = pv_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+pv_mean_sims$Variety_Mean <- rowMeans(pv_mean_sims)
+rownames(pv_mean_sims) <- c(names(data_pv_written_split), "Line Mean")
+round(pv_mean_sims, 3)
+```
+
+
+Create summary table.
+
+```{r}
+#| label: tbl-sim-coeffs-wrt
+tab <- data.frame(
+  Genitives = unlist(gen_mean_sims[10, ]),
+  Datives = unlist(dat_mean_sims[10, ]),
+  `Particle placement` = unlist(pv_mean_sims[10, ])
+) |> 
+  round(2)
+rownames(tab) <- c("1st line", "2nd line", "3rd line", "mean")
+tab
+```
+
+Core Grammar Score for **written data only**:
+
+```{r}
+round(rowMeans(tab[4,]), 3)
+```
+
+
+```{r}
+# clean up
+rm(genitives_variety_forests_vadis_wrt, datives_variety_forests_vadis_wrt, pv_variety_forests_vadis_wrt)
+invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+### Inner Circle only
+
+Just the Inner Circle data.
+
+```{r}
+#| label: data-inner-split
+data_gens_inner <- data_genitives |> 
+  filter(Variety %in% c("gb", "ire", "nz", "can")) |> 
+  mutate(
+    PorHeadLemma_pruned = filter_infrequent(POR_HEAD_LEMMA, 20),
+    PumHeadLemma_pruned = filter_infrequent(PUM_HEAD_LEMMA, 20)
+    ) |> 
+  droplevels() 
+data_gens_inner_split <- split(data_gens_inner, data_gens_inner$variety_of_E)
+
+data_dats_inner <- data_datives |> 
+  filter(Variety %in% c("GB", "CAN", "NZ", "IRE")) |> 
+  mutate(
+    Verb_pruned = filter_infrequent(Verb, 20),
+    RecHeadPlain_pruned = filter_infrequent(RecHeadPlain, 20),
+    ThemeHeadPlain_pruned = filter_infrequent(ThemeHeadPlain, 20)
+  ) |> 
+  droplevels() 
+data_dats_inner_split <- split(data_dats_inner, data_dats_inner$variety_of_E)
+
+data_pv_inner <- data_particle_verbs |> 
+  filter(Variety %in% c("GB", "CA", "NZ", "IE")) |> 
+  mutate(
+    VerbPart_pruned = filter_infrequent(VerbPart, 20),
+    Verb_pruned = filter_infrequent(Verb, 20)
+  ) |> 
+  droplevels() 
+data_pv_inner_split <- split(data_pv_inner, data_pv_inner$variety_of_E)
+# remove unnecessary
+rm(data_gens_inner, data_dats_inner, data_pv_inner); invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+Start with the **GENITIVE alternation**. First run the by-variety regression models.
+
+```{r}
+#| label: gens-vadis-glmer-inner
+if(!file.exists(here("model_output", "gen_glmer_list_inner.rds"))){
+  genitives_variety_glmer_inner <- vector("list")
+  for (i in seq_along(data_gens_inner_split)){
+    d <- data_gens_inner_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = gen_f4) # use the fitting function for convenience
+    # fit the model
+    genitives_variety_glmer_inner[[i]] <- glmer(
+      gen_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(genitives_variety_glmer_inner) <- names(data_gens_inner_split)
+  saveRDS(genitives_variety_glmer_inner, here("model_output", "genitives_variety_glmer_inner.rds"))
+} else {
+  genitives_variety_glmer_inner <- readRDS(here("model_output", "genitives_variety_glmer_inner.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(genitives_variety_glmer_inner), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf-vadis-inner
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_vadis_list_inner.rds"))){
+  genitives_variety_forests_vadis_inner <- readRDS(
+    here("model_output", "gen_crf_vadis_list_inner.rds")
+  )
+} else {
+  genitives_variety_forests_vadis_inner <- lapply(
+    data_gens_inner_split, function(x) fit_party_crf(gen_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(genitives_variety_forests_vadis_inner, here("model_output", "genitives_variety_forests_vadis_inner.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+gen_signif_line <- vadis_line1(genitives_variety_glmer_inner, path = here("model_output", "gens_line1_inner.rds"),
+                               overwrite = "reload")
+gen_coef_line <- vadis_line2(genitives_variety_glmer_inner, path = here("model_output", "gens_line2_inner.rds"),
+                               overwrite = "reload")
+gen_varimp_line <- vadis_line3(genitives_variety_forests_vadis_inner, 
+                                 path = here("model_output", "gens_line3_inner.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+gen_mean_sims <- data.frame(
+  line1 = gen_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = gen_coef_line$similarity.scores[,1],
+  line3 = gen_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+gen_mean_sims$Variety_Mean <- rowMeans(gen_mean_sims)
+rownames(gen_mean_sims) <- c(names(data_gens_inner_split), "Line Mean")
+round(gen_mean_sims, 3)
+```
+
+Next the **DATIVE alternation**.
+
+```{r}
+#| label: dats-vadis-glmer-inner
+if(!file.exists(here("model_output", "dat_glmer_list_inner.rds"))){
+  datives_variety_glmer_inner <- vector("list")
+  for (i in seq_along(data_dats_inner_split)){
+    d <- data_dats_inner_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = dat_f4) # use the fitting function for convenience
+    # fit the model
+    datives_variety_glmer_inner[[i]] <- glmer(
+      dat_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(datives_variety_glmer_inner) <- names(data_dats_inner_split)
+  saveRDS(datives_variety_glmer_inner, here("model_output", "datives_variety_glmer_inner.rds"))
+} else {
+  datives_variety_glmer_inner <- readRDS(here("model_output", "datives_variety_glmer_inner.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(datives_variety_glmer_inner), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: dats-data-split-crf-vadis-inner
+#| eval: false
+if(file.exists(here("model_output", "dat_crf_vadis_list_inner.rds"))){
+  datives_variety_forests_vadis_inner <- readRDS(
+    here("model_output", "dat_crf_vadis_list_inner.rds")
+  )
+} else {
+  datives_variety_forests_vadis_inner <- lapply(
+    data_dats_inner_split, function(x) fit_party_crf(dat_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(datives_variety_forests_vadis_inner, here("model_output", "datives_variety_forests_vadis_inner.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+dat_signif_line <- vadis_line1(datives_variety_glmer_inner, path = here("model_output", "dats_line1_inner.rds"),
+                               overwrite = "reload")
+dat_coef_line <- vadis_line2(datives_variety_glmer_inner, path = here("model_output", "dats_line2_inner.rds"),
+                               overwrite = "reload")
+dat_varimp_line <- vadis_line3(datives_variety_forests_vadis_inner, 
+                                 path = here("model_output", "dats_line3_inner.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+dat_mean_sims <- data.frame(
+  line1 = dat_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = dat_coef_line$similarity.scores[,1],
+  line3 = dat_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+dat_mean_sims$Variety_Mean <- rowMeans(dat_mean_sims)
+rownames(dat_mean_sims) <- c(names(data_dats_inner_split), "Line Mean")
+round(dat_mean_sims, 3)
+```
+
+
+Finally, the **PARTICLE PLACEMENT alternation**.
+
+```{r}
+#| label: pv-vadis-glmer-inner
+if(!file.exists(here("model_output", "pv_glmer_list_inner.rds"))){
+  pv_variety_glmer_inner <- vector("list")
+  for (i in seq_along(data_pv_inner_split)){
+    d <- data_pv_inner_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = pv_f4) # use the fitting function for convenience
+    # fit the model
+    pv_variety_glmer_inner[[i]] <- glmer(
+      pv_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(pv_variety_glmer_inner) <- names(data_pv_inner_split)
+  saveRDS(pv_variety_glmer_inner, here("model_output", "pv_variety_glmer_inner.rds"))
+} else {
+  pv_variety_glmer_inner <- readRDS(here("model_output", "pv_variety_glmer_inner.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(pv_variety_glmer_inner), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: pv-data-split-crf-vadis-inner
+#| eval: false
+if(file.exists(here("model_output", "pv_crf_vadis_list_inner.rds"))){
+  pv_variety_forests_vadis_inner <- readRDS(
+    here("model_output", "pv_crf_vadis_list_inner.rds")
+  )
+} else {
+  pv_variety_forests_vadis_inner <- lapply(
+    data_pv_inner_split, function(x) fit_party_crf(pv_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(pv_variety_forests_vadis_inner, here("model_output", "pv_variety_forests_vadis_inner.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+pv_signif_line <- vadis_line1(pv_variety_glmer_inner, path = here("model_output", "pv_line1_inner.rds"),
+                               overwrite = "reload")
+pv_coef_line <- vadis_line2(pv_variety_glmer_inner, path = here("model_output", "pv_line2_inner.rds"),
+                               overwrite = "reload")
+pv_varimp_line <- vadis_line3(pv_variety_forests_vadis_inner, 
+                                 path = here("model_output", "pv_line3_inner.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+pv_mean_sims <- data.frame(
+  line1 = pv_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = pv_coef_line$similarity.scores[,1],
+  line3 = pv_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+pv_mean_sims$Variety_Mean <- rowMeans(pv_mean_sims)
+rownames(pv_mean_sims) <- c(names(data_pv_inner_split), "Line Mean")
+round(pv_mean_sims, 3)
+```
+
+
+Create summary table.
+
+```{r}
+#| label: tbl-sim-coeffs-inner
+#| tbl-cap: "Similarity coefficients across lines of evidence and alternations. Input dataset: all available data. Coefficients range between 0 (total dissimilarity) and 1 (total similarity)."
+tab <- data.frame(
+  Genitives = unlist(gen_mean_sims[5, ]),
+  Datives = unlist(dat_mean_sims[5, ]),
+  `Particle placement` = unlist(pv_mean_sims[5, ])
+) |> 
+  round(2)
+rownames(tab) <- c("1st line", "2nd line", "3rd line", "mean")
+tab
+```
+
+Core Grammar Score for **Inner Circle data only**:
+
+```{r}
+round(rowMeans(tab[4,]), 3)
+```
+
+
+```{r}
+# clean up
+rm(genitives_variety_forests_vadis_inner, datives_variety_forests_vadis_inner, pv_variety_forests_vadis_inner)
+invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+### Outer Circle only
+
+Just the Outer Circle data.
+
+```{r}
+#| label: data-outer-split
+data_gens_outer <- data_genitives |> 
+  filter(Variety %in% c("ja", "sin", "hk", "phi", "ind")) |> 
+  mutate(
+    PorHeadLemma_pruned = filter_infrequent(POR_HEAD_LEMMA, 20),
+    PumHeadLemma_pruned = filter_infrequent(PUM_HEAD_LEMMA, 20)
+    ) |> 
+  droplevels() 
+data_gens_outer_split <- split(data_gens_outer, data_gens_outer$variety_of_E)
+
+data_dats_outer <- data_datives |> 
+  filter(Variety %in% c("JA", "SIN", "HK", "PHI", "IND")) |> 
+  mutate(
+    Verb_pruned = filter_infrequent(Verb, 20),
+    RecHeadPlain_pruned = filter_infrequent(RecHeadPlain, 20),
+    ThemeHeadPlain_pruned = filter_infrequent(ThemeHeadPlain, 20)
+  ) |> 
+  droplevels() 
+data_dats_outer_split <- split(data_dats_outer, data_dats_outer$variety_of_E)
+
+data_pv_outer <- data_particle_verbs |> 
+  filter(Variety %in% c("JA", "SG", "HK", "PH", "IN")) |> 
+  mutate(
+    VerbPart_pruned = filter_infrequent(VerbPart, 20),
+    Verb_pruned = filter_infrequent(Verb, 20)
+  ) |> 
+  droplevels() 
+data_pv_outer_split <- split(data_pv_outer, data_pv_outer$variety_of_E)
+# remove unnecessary
+rm(data_gens_outer, data_dats_outer, data_pv_outer); invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+Start with the **GENITIVE alternation**. First run the by-variety regression models.
+
+```{r}
+#| label: gens-vadis-glmer-outer
+if(!file.exists(here("model_output", "gen_glmer_list_outer.rds"))){
+  genitives_variety_glmer_outer <- vector("list")
+  for (i in seq_along(data_gens_outer_split)){
+    d <- data_gens_outer_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = gen_f4) # use the fitting function for convenience
+    # fit the model
+    genitives_variety_glmer_outer[[i]] <- glmer(
+      gen_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(genitives_variety_glmer_outer) <- names(data_gens_outer_split)
+  saveRDS(genitives_variety_glmer_outer, here("model_output", "genitives_variety_glmer_outer.rds"))
+} else {
+  genitives_variety_glmer_outer <- readRDS(here("model_output", "genitives_variety_glmer_outer.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(genitives_variety_glmer_outer), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: gens-data-split-crf-vadis-outer
+#| eval: false
+if(file.exists(here("model_output", "gen_crf_vadis_list_outer.rds"))){
+  genitives_variety_forests_vadis_outer <- readRDS(
+    here("model_output", "gen_crf_vadis_list_outer.rds")
+  )
+} else {
+  genitives_variety_forests_vadis_outer <- lapply(
+    data_gens_outer_split, function(x) fit_party_crf(gen_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(genitives_variety_forests_vadis_outer, here("model_output", "genitives_variety_forests_vadis_outer.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+gen_signif_line <- vadis_line1(genitives_variety_glmer_outer, path = here("model_output", "gens_line1_outer.rds"),
+                               overwrite = "reload")
+gen_coef_line <- vadis_line2(genitives_variety_glmer_outer, path = here("model_output", "gens_line2_outer.rds"),
+                               overwrite = "reload")
+gen_varimp_line <- vadis_line3(genitives_variety_forests_vadis_outer, 
+                                 path = here("model_output", "gens_line3_outer.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+gen_mean_sims <- data.frame(
+  line1 = gen_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = gen_coef_line$similarity.scores[,1],
+  line3 = gen_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+gen_mean_sims$Variety_Mean <- rowMeans(gen_mean_sims)
+rownames(gen_mean_sims) <- c(names(data_gens_outer_split), "Line Mean")
+round(gen_mean_sims, 3)
+```
+
+Next the **DATIVE alternation**.
+
+```{r}
+#| label: dats-vadis-glmer-outer
+if(!file.exists(here("model_output", "dat_glmer_list_outer.rds"))){
+  datives_variety_glmer_outer <- vector("list")
+  for (i in seq_along(data_dats_outer_split)){
+    d <- data_dats_outer_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = dat_f4) # use the fitting function for convenience
+    # fit the model
+    datives_variety_glmer_outer[[i]] <- glmer(
+      dat_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(datives_variety_glmer_outer) <- names(data_dats_outer_split)
+  saveRDS(datives_variety_glmer_outer, here("model_output", "datives_variety_glmer_outer.rds"))
+} else {
+  datives_variety_glmer_outer <- readRDS(here("model_output", "datives_variety_glmer_outer.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(datives_variety_glmer_outer), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: dats-data-split-crf-vadis-outer
+#| eval: false
+if(file.exists(here("model_output", "dat_crf_vadis_list_outer.rds"))){
+  datives_variety_forests_vadis_outer <- readRDS(
+    here("model_output", "dat_crf_vadis_list_outer.rds")
+  )
+} else {
+  datives_variety_forests_vadis_outer <- lapply(
+    data_dats_outer_split, function(x) fit_party_crf(dat_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(datives_variety_forests_vadis_outer, here("model_output", "datives_variety_forests_vadis_outer.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+dat_signif_line <- vadis_line1(datives_variety_glmer_outer, path = here("model_output", "dats_line1_outer.rds"),
+                               overwrite = "reload")
+dat_coef_line <- vadis_line2(datives_variety_glmer_outer, path = here("model_output", "dats_line2_outer.rds"),
+                               overwrite = "reload")
+dat_varimp_line <- vadis_line3(datives_variety_forests_vadis_outer, 
+                                 path = here("model_output", "dats_line3_outer.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+dat_mean_sims <- data.frame(
+  line1 = dat_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = dat_coef_line$similarity.scores[,1],
+  line3 = dat_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+dat_mean_sims$Variety_Mean <- rowMeans(dat_mean_sims)
+rownames(dat_mean_sims) <- c(names(data_dats_outer_split), "Line Mean")
+round(dat_mean_sims, 3)
+```
+
+
+Finally, the **PARTICLE PLACEMENT alternation**.
+
+```{r}
+#| label: pv-vadis-glmer-outer
+if(!file.exists(here("model_output", "pv_glmer_list_outer.rds"))){
+  pv_variety_glmer_outer <- vector("list")
+  for (i in seq_along(data_pv_outer_split)){
+    d <- data_pv_outer_split[[i]]
+    # standardize the model inputs, excluding the response and random effects
+    d_std <- VADIS::stand(d, cols = pv_f4) # use the fitting function for convenience
+    # fit the model
+    pv_variety_glmer_outer[[i]] <- glmer(
+      pv_f4, data = d_std, family = binomial, control = glmer_ctrl)
+    rm(d, d_std) # remove datasets
+  }
+  names(pv_variety_glmer_outer) <- names(data_pv_outer_split)
+  saveRDS(pv_variety_glmer_outer, here("model_output", "pv_variety_glmer_outer.rds"))
+} else {
+  pv_variety_glmer_outer <- readRDS(here("model_output", "pv_variety_glmer_outer.rds"))
+}
+```
+
+Check models.
+
+```{r}
+round(VADIS::summary_stats(pv_variety_glmer_outer), 3)
+```
+
+Now fit random forest for each variety.
+
+```{r}
+#| label: pv-data-split-crf-vadis-outer
+#| eval: false
+if(file.exists(here("model_output", "pv_crf_vadis_list_outer.rds"))){
+  pv_variety_forests_vadis_outer <- readRDS(
+    here("model_output", "pv_crf_vadis_list_outer.rds")
+  )
+} else {
+  pv_variety_forests_vadis_outer <- lapply(
+    data_pv_outer_split, function(x) fit_party_crf(pv_f1, x, controls = cforest_unbiased(ntree = 500, mtry = 3))
+  )
+  saveRDS(pv_variety_forests_vadis_outer, here("model_output", "pv_variety_forests_vadis_outer.rds"))
+}
+```
+
+
+Run the VADIS analyses for lines 1, 2 and 3.
+
+```{r}
+pv_signif_line <- vadis_line1(pv_variety_glmer_outer, path = here("model_output", "pv_line1_outer.rds"),
+                               overwrite = "reload")
+pv_coef_line <- vadis_line2(pv_variety_glmer_outer, path = here("model_output", "pv_line2_outer.rds"),
+                               overwrite = "reload")
+pv_varimp_line <- vadis_line3(pv_variety_forests_vadis_outer, 
+                                 path = here("model_output", "pv_line3_outer.rds"), 
+                                 conditional = FALSE,
+                               overwrite = "reload")
+```
+
+Now look at the mean values by line and variety.
+
+```{r}
+pv_mean_sims <- data.frame(
+  line1 = pv_signif_line$similarity.scores[,1], # get only the values in the 2nd column
+  line2 = pv_coef_line$similarity.scores[,1],
+  line3 = pv_varimp_line$similarity.scores[,1]
+) %>% 
+  add_row(!!! colMeans(.))
+pv_mean_sims$Variety_Mean <- rowMeans(pv_mean_sims)
+rownames(pv_mean_sims) <- c(names(data_pv_outer_split), "Line Mean")
+round(pv_mean_sims, 3)
+```
+
+Create summary table.
+
+
+```{r}
+#| label: tbl-sim-coeffs-outer
+tab <- data.frame(
+  Genitives = unlist(gen_mean_sims[6, ]),
+  Datives = unlist(dat_mean_sims[6, ]),
+  `Particle placement` = unlist(pv_mean_sims[6, ])
+) |> 
+  round(2)
+rownames(tab) <- c("1st line", "2nd line", "3rd line", "mean")
+tab
+```
+
+Core Grammar Score for **Outer Circle data only**:
+
+```{r}
+round(rowMeans(tab[4,]), 3)
+```
+
+
+```{r}
+# clean up
+rm(genitives_variety_forests_vadis_outer, datives_variety_forests_vadis_outer, pv_variety_forests_vadis_outer)
+invisible(gc(verbose = FALSE)) # free unused memory
+```
+
+## 6.5 Evaluating Coherence
+
+### By-line pairwise correlations
+
+```{r}
+gen_line12 <- vegan::mantel(gen_signif_line$distance.matrix, gen_coef_line$distance.matrix)
+gen_line13 <- vegan::mantel(gen_signif_line$distance.matrix, gen_varimp_line$distance.matrix)
+gen_line23 <- vegan::mantel(gen_coef_line$distance.matrix, gen_varimp_line$distance.matrix)
+
+dat_line12 <- vegan::mantel(dat_signif_line$distance.matrix, dat_coef_line$distance.matrix)
+dat_line13 <- vegan::mantel(dat_signif_line$distance.matrix, dat_varimp_line$distance.matrix)
+dat_line23 <- vegan::mantel(dat_coef_line$distance.matrix, dat_varimp_line$distance.matrix)
+
+pv_line12 <- vegan::mantel(pv_signif_line$distance.matrix, pv_coef_line$distance.matrix)
+pv_line13 <- vegan::mantel(pv_signif_line$distance.matrix, pv_varimp_line$distance.matrix)
+pv_line23 <- vegan::mantel(pv_coef_line$distance.matrix, pv_varimp_line$distance.matrix)
+```
+
+## 7.2 Experimental results
+
+Below are plots of residuals and random effects adjustments for the model of experimental ratings.
+
+#### Residuals
+
+Check normality of residuals.
+
+```{r}
+#| label: fig-resids
+#| fig-width: 5
+#| fig-height: 4
+data.frame(resids = residuals(rating_mod0)) |>
+  ggplot(aes(sample = resids)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(x = "theoretical quantiles", "sample quantiles") +
+  ggtitle("QQ plot of model residuals") +
+  theme_cup()
+```
+
+
+
+#### Random effects
+
+We can check the BLUPs for the random effects to make sure they are normal.
+
+```{r}
+#| label: fig-blups
+#| fig-cap: "Distribution of BLUPs for model of experimental ratings."
+#| fig-width: 5
+#| fig-height: 4
+#| code-fold: true
+item_df <- lme4::ranef(rating_mod1)[["item"]] |>
+    as.data.frame() |>
+    tidyr::pivot_longer(cols = everything()) |>
+    mutate(
+      group = "item",
+      name = paste0("item|", name)
+    )
+
+id_df <- lme4::ranef(rating_mod1)[["id"]] |>
+  as.data.frame() |>
+  tidyr::pivot_longer(cols = everything()) |>
+  mutate(
+    group = "item",
+    name = paste0("id|", name),
+    name = str_replace(name, "z.DirObjWordLength", "DirObjWordLength"),
+    name = str_replace(name, "z.pred_min", "CorpusPred")
+  )
+
+full_df <- bind_rows(
+  id_df,
+  item_df
+)
+
+nested_df <- full_df |>
+  group_by(name) |>
+  nest()
+
+p <- map(
+  seq_along(nested_df$data),
+  .f = function(i){
+    d <- nested_df$data[[i]]
+    p <- d |>
+      ggplot(aes(sample = value)) +
+      geom_qq() +
+      geom_qq_line() +
+      labs(x = "",
+           y = "") +
+      theme_cup() +
+      ggtitle(pull(nested_df, name)[i])
+    return(p)
+  }) |> 
+  wrap_plots(ncol = 2)
+
+ylab <- data.frame(
+  label = "Theoretical",
+  x = 1,
+  y = 1
+) |>
+  ggplot() +
+  geom_text(aes(x, y, label = label), angle = 90) +
+  theme_void() +
+  coord_cartesian(clip = "off")
+
+
+p <- ylab + p + plot_layout(widths = c(1, 25)) +
+  plot_annotation(
+    caption = "Observed",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 12,
+                                              margin = margin(t = 0),
+                                              family = "serif"))
+  )
+p
+```
+
+
+
+
+# Session Info
+
+Most recent session info for the analysis.
+
+```{r}
+#| label: session-info
+#| echo: false
+devtools::session_info()
+```
+
+
+
+# References
